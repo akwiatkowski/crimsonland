@@ -8,6 +8,7 @@ local audio = require("src.engine.audio")
 local bms = require("src.game.bms")
 local data = require("src.game.data")
 local particles = require("src.game.particles")
+local perks = require("src.game.perks")
 
 local game = {}
 
@@ -142,6 +143,9 @@ function game.start_quest(chapter, quest, difficulty)
 	game.creatures = {}
 	game.bullets = {}
 	game.drops = {}
+	game.mods = perks.fresh_mods()
+	game.owned_perks = {}
+	game.perk_choices = nil
 	-- highest weapon index that may drop; grows with chapter progress
 	game.weapon_cap = math.min(30, 6 + 5 * (chapter - 1))
 	particles.clear()
@@ -201,6 +205,62 @@ local function spawn_creature(game)
 	}
 end
 
+-- --------------------------------------------------------- perk choosing
+
+--- effective clip size with perk modifiers
+function game.clip_size()
+	return math.floor(game.player.weapon.clip_size * game.mods.clip + 0.5)
+end
+
+local function set_perk_desc(screen, perk)
+	local comps = require("src.engine.comps")
+	if screen.compmap.PerkName then
+		comps.set(screen.compmap.PerkName, "textbox.text", { perk.name })
+	end
+	if screen.compmap.PerkDesc then
+		comps.set(screen.compmap.PerkDesc, "textbox.text", { perk.desc })
+	end
+end
+
+--- Push the original PickAPerk screen and fill its comps with our choices.
+-- The C++ engine populated these; we do the same from the game layer.
+local function open_perk_screen(game)
+	local choices = perks.offer(3, game.owned_perks)
+	if #choices == 0 then -- all perks owned: fall back to a heal
+		game.player.hp = math.min(game.player.max_hp, game.player.hp + 25)
+		return
+	end
+	game.perk_choices = choices
+	audio.play_sound("sfx/unlock_perk")
+	local screens = require("src.engine.screens")
+	local comps = require("src.engine.comps")
+	local s = screens.push("PickAPerk")
+	if s.compmap.Title then
+		comps.set(s.compmap.Title, "textbox.text",
+			{ ("Level %d - Pick a Perk"):format(game.level) })
+	end
+	for i = 1, 5 do
+		local b = s.compmap["PerkButton_" .. i]
+		if b then
+			if choices[i] then
+				comps.set(b, "button.text", { choices[i].name })
+				comps.set(b, "visible", { true })
+			else
+				comps.set(b, "visible", { false })
+			end
+		end
+	end
+	set_perk_desc(s, choices[1])
+end
+
+-- while the perk screen is open, hovering a button previews its description
+local function update_perk_hover(screen)
+	local hover = screen._hover_comp
+	local n = hover and hover.name:match("^PerkButton_(%d+)$")
+	local perk = n and game.perk_choices and game.perk_choices[tonumber(n)]
+	if perk then set_perk_desc(screen, perk) end
+end
+
 -- ------------------------------------------------------------ update
 
 local function update_player(game, dt)
@@ -213,8 +273,9 @@ local function update_player(game, dt)
 	p.moving = (dx ~= 0 or dy ~= 0)
 	if p.moving then
 		local len = math.sqrt(dx * dx + dy * dy)
-		p.x = math.max(16, math.min(WORLD - 16, p.x + dx / len * p.speed * dt))
-		p.y = math.max(16, math.min(WORLD - 16, p.y + dy / len * p.speed * dt))
+		local speed = p.speed * game.mods.speed
+		p.x = math.max(16, math.min(WORLD - 16, p.x + dx / len * speed * dt))
+		p.y = math.max(16, math.min(WORLD - 16, p.y + dy / len * speed * dt))
 		p.anim_t = p.anim_t + dt
 	end
 
@@ -231,19 +292,19 @@ local function update_player(game, dt)
 	if p.reloading > 0 then
 		p.reloading = p.reloading - dt
 		if p.reloading <= 0 then
-			p.ammo = p.weapon.clip_size
+			p.ammo = game.clip_size()
 		end
-	elseif love.keyboard.isDown("r") and p.ammo < p.weapon.clip_size then
-		p.reloading = p.weapon.reload_time
+	elseif love.keyboard.isDown("r") and p.ammo < game.clip_size() then
+		p.reloading = p.weapon.reload_time * game.mods.reload
 		audio.play_sound(p.weapon.snd_reload)
 	end
 
 	if love.mouse.isDown(1) and p.reloading <= 0 and p.cooldown <= 0 then
 		if p.ammo <= 0 then
-			p.reloading = p.weapon.reload_time
+			p.reloading = p.weapon.reload_time * game.mods.reload
 			audio.play_sound(p.weapon.snd_reload)
 		else
-			p.cooldown = p.weapon.shoot_interval
+			p.cooldown = p.weapon.shoot_interval / game.mods.fire
 			p.ammo = p.ammo - 1
 			p.muzzle = 0.05
 			audio.play_sound(p.weapon.snd_fire, 1, 0, 1 + (love.math.random() - 0.5) / 6)
@@ -262,7 +323,7 @@ local function update_player(game, dt)
 					dy = math.sin(a),
 					speed = w.projectile_speed * BULLET_SPEED_SCALE,
 					dist_left = range * (FLAME[w.id] and (0.6 + love.math.random() * 0.4) or 1),
-					damage = w.damage_effective,
+					damage = w.damage_effective * game.mods.dmg,
 					explosive = EXPLOSIVE[w.id] or nil,
 					flame = FLAME[w.id] or nil,
 				}
@@ -302,7 +363,11 @@ local function damage_creature(game, c, dmg)
 		particles.death_burst(c.x, c.y, c.variant.scale)
 		game.kills = game.kills + 1
 		game.score = game.score + c.variant.xp
-		game.xp = game.xp + c.variant.xp
+		game.xp = game.xp + c.variant.xp * game.mods.xp
+		if game.mods.kill_heal > 0 then
+			game.player.hp = math.min(game.player.max_hp,
+				game.player.hp + game.mods.kill_heal)
+		end
 		try_drop(game, c.x, c.y)
 		local snd = c.def and c.def.sounds
 		if snd then
@@ -377,12 +442,13 @@ local function update_drops(game, dt)
 		if ddx * ddx + ddy * ddy < PICKUP_RADIUS * PICKUP_RADIUS then
 			if d.kind == "weapon" then
 				p.weapon = d.weapon
-				p.ammo = d.weapon.clip_size
 				p.reloading = 0
 				p.cooldown = 0
+				p.ammo = game.clip_size()
 				audio.play_sound("sfx/unlock_weapon")
 			else
-				p.hp = math.min(p.max_hp, p.hp + HEALTH_PACK_HEAL)
+				p.hp = math.min(p.max_hp,
+					p.hp + HEALTH_PACK_HEAL * game.mods.heal_mul)
 				audio.play_sound("sfx/ui_clink_01")
 			end
 			particles.sparkle(d.x, d.y)
@@ -427,13 +493,20 @@ local function update_creatures(game, dt)
 				c.x = c.x + dx / dist * speed * dt
 				c.y = c.y + dy / dist * speed * dt
 			end
-			-- contact damage
+			-- contact damage (perks: Thick Skinned, Tough Reloader, Radioactive)
 			local touch = 16 * c.variant.scale + 14
-			if dist < touch and c.attack_cd <= 0 then
-				c.attack_cd = 0.8
-				p.hp = p.hp - c.variant.damage * game.damage_mul
-				local snd = c.def and c.def.sounds and c.def.sounds.snd_attack_01
-				if snd and snd ~= "!NONE" then audio.play_sound(snd) end
+			if dist < touch then
+				if c.attack_cd <= 0 then
+					c.attack_cd = 0.8
+					local taken = game.mods.taken
+					if p.reloading > 0 then taken = taken * game.mods.reload_guard end
+					p.hp = p.hp - c.variant.damage * game.damage_mul * taken
+					local snd = c.def and c.def.sounds and c.def.sounds.snd_attack_01
+					if snd and snd ~= "!NONE" then audio.play_sound(snd) end
+				end
+				if game.mods.touch_burn > 0 then
+					damage_creature(game, c, game.mods.touch_burn * dt)
+				end
 			end
 		end
 	end
@@ -441,6 +514,16 @@ end
 
 function game.update(dt)
 	if not game.active then return end
+
+	-- gameplay pauses whenever a UI screen overlays the game
+	-- (PickAPerk, LevelCompleted, ...); keep the perk preview live
+	local screens = require("src.engine.screens")
+	local top = screens.top()
+	if top and top.name ~= "GameCrimsonland" then
+		if top.name == "PickAPerk" then update_perk_hover(top) end
+		return
+	end
+
 	game.time = game.time + dt
 
 	if game.outcome then
@@ -469,13 +552,20 @@ function game.update(dt)
 		spawn_creature(game)
 	end
 
-	-- level ups (perk choice is not implemented yet; heal a bit instead)
+	-- level up -> pick a perk (gameplay pauses under the screen)
 	if game.xp >= game.xp_next then
 		game.xp = game.xp - game.xp_next
 		game.level = game.level + 1
 		game.xp_next = math.floor(game.xp_next * 1.5)
-		game.player.hp = math.min(game.player.max_hp, game.player.hp + 25)
 		print(("[game] level up! now level %d"):format(game.level))
+		open_perk_screen(game)
+		return
+	end
+
+	-- perk-driven regeneration
+	local mods = game.mods
+	if mods.regen > 0 then
+		game.player.hp = math.min(game.player.max_hp, game.player.hp + mods.regen * dt)
 	end
 
 	-- win/lose
@@ -614,7 +704,7 @@ function game.draw()
 	love.graphics.setColor(1, 1, 1, 1)
 	love.graphics.printf(string.format("HP %d", math.max(0, math.floor(p.hp))), 10, 10, 200, "left")
 	love.graphics.printf(string.format("%s  %d/%d%s", p.weapon.name or p.weapon.id,
-		p.ammo, p.weapon.clip_size,
+		p.ammo, game.clip_size(),
 		p.reloading > 0 and " (reloading)" or ""), 10, 30, 400, "left")
 	love.graphics.printf(string.format("KILLS %d/%d   SCORE %d   LEVEL %d",
 		game.kills, game.kills_goal, game.score, game.level), 10, 50, 600, "left")
@@ -652,6 +742,19 @@ function game.on_ui_click(screen_name, comp_name)
 			local timeline = require("src.engine.timeline")
 			game.start_quest(selected_chapter, tonumber(q), selected_difficulty)
 			timeline.begin("Game")
+			return true
+		end
+	elseif screen_name == "PickAPerk" then
+		local n = comp_name:match("^PerkButton_(%d+)$")
+		local perk = n and game.perk_choices and game.perk_choices[tonumber(n)]
+		if perk then
+			game.owned_perks[perk.id] = true
+			perk.apply(game.mods, game)
+			game.perk_choices = nil
+			audio.play_sound("sfx/unlocked")
+			print(("[game] perk chosen: %s"):format(perk.name))
+			local screens = require("src.engine.screens")
+			screens.pop("PickAPerk")
 			return true
 		end
 	end

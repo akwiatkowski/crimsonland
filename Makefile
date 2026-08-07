@@ -1,6 +1,7 @@
 # Crimsonland macOS port — build & run automation.
 #
-# `make run`      — launch the game with LÖVE
+# `make run`      — launch the game with LÖVE (interactive play)
+# `make test`     — autotest: scripted input + ASCII captures to the terminal
 # `make extract`  — rebuild vendor/ from the original GOG rar
 # `make clean`    — remove extracted vendor data (keeps the rar)
 
@@ -14,10 +15,13 @@ PAKS     := $(APP_DIR)/data.pak $(APP_DIR)/data-1080p.pak \
             $(APP_DIR)/data-music-OGG_44100.pak $(APP_DIR)/data-sfx-OGG_44100.pak
 STAMP    := $(VENDOR)/.extracted
 
-.PHONY: run extract clean check-love
+.PHONY: run test extract clean check-love
 
 run: check-love
 	$(LOVE) .
+
+test: check-love
+	$(LOVE) . --autotest
 
 check-love:
 	@test -x "$(LOVE)" || { \

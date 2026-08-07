@@ -1,8 +1,14 @@
 -- Entry point. All engine code lives under src/engine.
 
--- Debug harness (headless-friendly): tee prints to a log file and render the
--- output canvas as ASCII art at timed intervals, so behavior can be verified
--- from the terminal without a display.
+-- `love . --autotest` (make test) enables the debug harness: scripted input
+-- driving menus -> quest -> abort, plus ASCII canvas captures, so behavior
+-- can be verified from the terminal without touching the window.
+local autotest = false
+for _, a in ipairs(arg or {}) do
+	if a == "--autotest" then autotest = true end
+end
+
+-- tee prints to a log file (always on; cheap and useful for bug reports)
 local logfile = io.open("/tmp/crimsonland_port.log", "w")
 local real_print = print
 print = function(...)
@@ -18,6 +24,8 @@ end
 
 local engine = require("src.engine")
 engine.start()
+
+if autotest then
 
 -- ASCII-art capture of the reference canvas at fixed times after boot.
 local captures = { 2.0, 6.0, 9.0, 12.0, 15.0 }
@@ -113,3 +121,5 @@ love.update = function(dt)
 		capture_ascii()
 	end
 end
+
+end -- autotest

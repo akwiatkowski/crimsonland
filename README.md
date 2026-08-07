@@ -47,7 +47,11 @@ brew install innoextract
 # put Crimsonland.2014.rar in vendor/
 make extract   # unpacks rar -> GOG installer -> paks -> vendor/assets*
 make run       # launches with LÖVE (expects ~/Applications/love.app)
+make test      # scripted autotest: menus -> quest 1.1 -> abort, ASCII captures
 ```
+
+In-game controls: WASD/arrows move, mouse aims, LMB fires, R reloads,
+Escape aborts the quest back to the menu.
 
 ## Layout
 

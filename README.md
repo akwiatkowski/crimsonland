@@ -29,16 +29,23 @@ Done:
 - [x] Confirmed Lua scripts are plaintext (not bytecode)
 - [x] Identified 61 `NX_*` engine API functions (strings in `prog.dll`)
 - [x] LÖVE runtime running the original UI scripts — menus render and navigate
-- [x] First playable gameplay: quest mode on the original XML data
-      (terrain baking, creature spawning/AI, weapons, `.bms` animations, HUD)
+- [x] Playable quest mode on the original XML data (terrain baking, creature
+      spawning/AI, weapons, `.bms` animations, HUD)
+- [x] Weapon + medikit drops (rockets explode, flamethrowers spray), particle FX,
+      persistent gore baked into the terrain
+- [x] Perks on level-up via the original PickAPerk screen (12 classic perks)
+- [x] Survival mode (ramping waves) with the original SurvivalOver stats screen;
+      quest results use LevelCompleted/LevelFailed (Play Next / Retry)
+- [x] Persistence: profiles, completed quests, survival high score
 
 Next:
 
-- [ ] Perk picking on level-up (currently a small heal)
-- [ ] Powerups, particle FX (`fxs/` DSL is parsed but not drawn)
-- [ ] Survival mode; real quest definitions (kill-count table is an approximation —
-      original quest setups were compiled into `prog.dll`, only `custom-quests/` ships as XML)
-- [ ] Persistence: profiles, unlocks, high scores (`DM_*` database API)
+- [ ] Original `fxs/` particle DSL interpreter (current FX layer is hand-rolled)
+- [ ] Real quest definitions (kill-count table is an approximation — original
+      quest setups were compiled into `prog.dll`, only `custom-quests/` ships as XML)
+- [ ] Remaining survival submodes (Rush, Weapon Picker, Nukefism, Blitz, Waves)
+- [ ] Powerup pickups beyond drops (nuke, freeze, fire ring — `powerups/` art ships)
+- [ ] Quest unlock gating + HighScores/Statistics screens fed from the save data
 
 ## Rebuilding from scratch
 

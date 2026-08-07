@@ -80,11 +80,18 @@ NX_SetCursor NX_GetInterface NX_GetTime NX_FileExists NX_Popup NX_CallExtension`
 - `bms.lua` — parser for the 10tons `NX_Bm_Seq_v1` animation format
   (frame table + packed PNG atlas). Uses `love.data.unpack` (NOT string.unpack —
   LuaJIT is Lua 5.1)
-- `play.lua` — quest mode: terrain baking from terrains.xml ops, creature
-  spawn/AI/contact damage, weapon firing from weapons.xml stats, XP/levels,
-  win/lose → back to timeline. Hooked into the engine via the GameCrimsonland
-  internal screen (update/draw) and unhandled UI clicks (screens.lua routes
-  Chapter_N / Quest_N / Difficulty_* to `game.on_ui_click`)
+- `play.lua` — quest + survival modes: terrain baking from terrains.xml ops,
+  creature spawn/AI/contact damage, weapon firing from weapons.xml stats
+  (damage derived from stat_damage — see data.lua), drops, XP/levels/perks,
+  outcome → original end screens. Hooked into the engine via the
+  GameCrimsonland internal screen (update/draw) and unhandled UI clicks
+  (screens.lua routes them to `game.on_ui_click`). Gameplay pauses whenever
+  any UI screen overlays GameCrimsonland
+- `perks.lua` — clean-room classic perk set as game.mods multipliers;
+  PickAPerk comps are filled from the game layer (C++ did this originally)
+- `particles.lua` — hand-rolled FX layer (NOT the fxs/ DSL — still open)
+- `save.lua` — platform state + progress to LÖVE save dir (identity
+  crimsonland-mac), sandboxed load, flushed on quit/outcomes
 - Quest kill-count/spawn tables are approximations — original quest defs were
   compiled into prog.dll; only `custom-quests/` ships as XML
 

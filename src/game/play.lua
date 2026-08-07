@@ -9,6 +9,7 @@ local bms = require("src.game.bms")
 local data = require("src.game.data")
 local particles = require("src.game.particles")
 local perks = require("src.game.perks")
+local quests = require("src.game.quests")
 
 local game = {}
 
@@ -23,16 +24,7 @@ local SPEED_SCALE = 45 -- creature speed 2.7 -> 122 px/s
 local BULLET_SPEED_SCALE = 16 -- projectile_speed 55 -> 880 px/s
 local RANGE_SCALE = 4 -- projectile_range 300 -> 1200 px
 
--- per-chapter creature unlock table (quest generator approximation)
-local CHAPTER_CREATURES = {
-	{ "ALIEN", "ZOMBIE" },
-	{ "ALIEN", "ZOMBIE", "SPIDER1" },
-	{ "ZOMBIE", "SPIDER1", "LIZARD" },
-	{ "SPIDER1", "SPIDER2", "LIZARD", "BEETLE" },
-	{ "SPIDER2", "LIZARD", "BEETLE", "MAGGOT" },
-	{ "SPIDER2", "LIZARD", "BEETLE", "MAGGOT", "CRABFLY" },
-	{ "SPIDER2", "BEETLE", "CRABFLY", "SPIDER_BOSS" },
-}
+local NUM_CHAPTERS = 7
 
 local DIFFICULTY = { NORMAL = 1.0, HARDCORE = 1.5, GRIM = 2.0 }
 

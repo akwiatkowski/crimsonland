@@ -69,8 +69,24 @@ NX_SetCursor NX_GetInterface NX_GetTime NX_FileExists NX_Popup NX_CallExtension`
 1. Inventory the full Lua API (NX_* + game objects) the scripts actually use.
 2. Implement a runtime on **LÖVE 11.x** (LuaJIT = Lua 5.1 compatible) — love2d's
    image/audio/draw API maps closely onto NX_*. Add `LuaInclude` shim.
-3. Milestones: main menu renders → menu navigation → gameplay loop → polish
-   (achievements, leaderboards are stubbed/optional).
+3. Milestones: main menu renders ✓ → menu navigation ✓ → gameplay loop ✓
+   (first playable quest mode in `src/game/`) → polish (perks, powerups, FX,
+   survival mode, persistence; achievements/leaderboards are stubbed/optional).
+
+## Gameplay layer (src/game/)
+
+- `data.lua` — loads original XML datasets (weapons, creatures, variants,
+  terrains, chapters) into Lua tables
+- `bms.lua` — parser for the 10tons `NX_Bm_Seq_v1` animation format
+  (frame table + packed PNG atlas). Uses `love.data.unpack` (NOT string.unpack —
+  LuaJIT is Lua 5.1)
+- `play.lua` — quest mode: terrain baking from terrains.xml ops, creature
+  spawn/AI/contact damage, weapon firing from weapons.xml stats, XP/levels,
+  win/lose → back to timeline. Hooked into the engine via the GameCrimsonland
+  internal screen (update/draw) and unhandled UI clicks (screens.lua routes
+  Chapter_N / Quest_N / Difficulty_* to `game.on_ui_click`)
+- Quest kill-count/spawn tables are approximations — original quest defs were
+  compiled into prog.dll; only `custom-quests/` ships as XML
 
 ## Conventions
 

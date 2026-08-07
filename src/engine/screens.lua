@@ -315,6 +315,9 @@ function screens.mousepressed(x, y, button)
 					hit.props["checkbox.value"] = not (v == true or v == 1)
 				end
 				screens.call(top, "OnClick", hit.name)
+				-- clicks the script's OnClick ignores (Chapter_N, Quest_N —
+				-- handled in C++ originally) fall through to the game layer
+				require("src.game.play").on_ui_click(top.name, hit.name)
 				return
 			end
 		end

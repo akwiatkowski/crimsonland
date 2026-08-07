@@ -522,7 +522,12 @@ local function register_internal_screens()
 	}
 	screens.registry["GameCrimsonland"] = {
 		internal = function(screen)
+			local game = require("src.game.play")
 			screen.props.covers_screen = true
+			screen.env.OnUpdate = function(dt) game.update(dt) end
+			screen.env.OnKeyDown = function(key)
+				if key == "ESCAPE" and game.active then game.abort() end
+			end
 			screen.env.OnDraw = function() end
 		end,
 	}
@@ -573,16 +578,8 @@ local function draw_internal(screen)
 				(screens.HEIGHT - img:getHeight()) / 2)
 		end
 	elseif screen.name == "GameCrimsonland" then
-		-- placeholder backdrop until gameplay is implemented
-		love.graphics.setColor(0.05, 0.02, 0.03, 1)
-		love.graphics.rectangle("fill", 0, 0, screens.WIDTH, screens.HEIGHT)
-		local img = assets.image("scene/background.jpg")
-		if img then
-			love.graphics.setColor(0.5, 0.5, 0.5, 1)
-			local sx = screens.WIDTH / img:getWidth()
-			local sy = screens.HEIGHT / img:getHeight()
-			love.graphics.draw(img, 0, 0, 0, sx, sy)
-		end
+		-- gameplay when a quest is active, menu backdrop otherwise
+		require("src.game.play").draw()
 	end
 end
 engine.draw_internal = draw_internal

@@ -20,15 +20,37 @@ local engine = require("src.engine")
 engine.start()
 
 -- ASCII-art capture of the reference canvas at fixed times after boot.
-local captures = { 2.0, 6.0, 10.0 }
+local captures = { 2.0, 6.0, 9.0, 12.0, 15.0 }
 local capture_idx = 1
 local elapsed = 0
 
 -- scripted input for headless interaction testing
 local screens_mod = require("src.engine.screens")
+local comps_mod = require("src.engine.comps")
+
+-- click the center of a named comp on the top screen (reference -> window px)
+local function click_button(name)
+	local top = screens_mod.top()
+	local comp = top and top.compmap[name]
+	if not comp then
+		print(("[test] no button '%s' on %s"):format(name, top and top.name or "?"))
+		return
+	end
+	local x, y, w, h = comps_mod.screen_rect(comp)
+	local ww, wh = love.graphics.getDimensions()
+	local scale = math.min(ww / 960, wh / 640)
+	local ox = (ww - 960 * scale) / 2
+	local oy = (wh - 640 * scale) / 2
+	screens_mod.mousepressed((x + w / 2) * scale + ox, (y + h / 2) * scale + oy, 1)
+end
+
+-- menu -> quest 1.1 -> play a while -> abort back to the menu
 local actions = {
-	{ t = 5.0, fn = function() screens_mod.mousepressed(560 * 1.5, 226 * 1.5, 1) end }, -- Play
-	{ t = 9.0, fn = function() screens_mod.keypressed("escape") end }, -- Back
+	{ t = 2.5, fn = function() click_button("PlayMenu") end },
+	{ t = 4.0, fn = function() click_button("Play_Quests") end },
+	{ t = 5.5, fn = function() click_button("Chapter_1") end },
+	{ t = 7.0, fn = function() click_button("Quest_1") end },
+	{ t = 13.0, fn = function() screens_mod.keypressed("escape") end },
 }
 local action_idx = 1
 
@@ -41,6 +63,12 @@ local function capture_ascii()
 			i, s.name, s.phase, s.timer, #s.comps, s.leaving and " LEAVING" or "")
 	end
 	print(table.concat(info, "\n"))
+	local game = require("src.game.play")
+	if game.active then
+		print(string.format("  game t=%.1f hp=%d kills=%d/%d creatures=%d bullets=%d",
+			game.time, game.player.hp, game.kills, game.kills_goal,
+			#game.creatures, #game.bullets))
+	end
 	local comps = require("src.engine.comps")
 	local top = screens.top()
 	if top then

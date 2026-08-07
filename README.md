@@ -28,34 +28,36 @@ Done:
       `assets-music/` (7 OGG), `assets-sfx/` (104 OGG)
 - [x] Confirmed Lua scripts are plaintext (not bytecode)
 - [x] Identified 61 `NX_*` engine API functions (strings in `prog.dll`)
+- [x] LÖVE runtime running the original UI scripts — menus render and navigate
+- [x] First playable gameplay: quest mode on the original XML data
+      (terrain baking, creature spawning/AI, weapons, `.bms` animations, HUD)
 
 Next:
 
-- [ ] Find the game entry point / script bootstrap order (`events.lua`, `loader/`)
-- [ ] Enumerate the full Lua API surface beyond `NX_*` (game objects: creatures,
-      weapons, players — check what globals/scripts expect)
-- [ ] Build a minimal LÖVE runtime implementing `NX_*` + `LuaInclude`
-- [ ] Get the main menu rendering, then gameplay
+- [ ] Perk picking on level-up (currently a small heal)
+- [ ] Powerups, particle FX (`fxs/` DSL is parsed but not drawn)
+- [ ] Survival mode; real quest definitions (kill-count table is an approximation —
+      original quest setups were compiled into `prog.dll`, only `custom-quests/` ships as XML)
+- [ ] Persistence: profiles, unlocks, high scores (`DM_*` database API)
 
 ## Rebuilding from scratch
 
 ```sh
 brew install innoextract
-bsdtar -xf Crimsonland.2014.rar
-mkdir extracted && innoextract -d extracted setup_crimsonland_2.2.0.4.exe
-python3 tools/extract_pak.py extracted/app/data.pak assets
-python3 tools/extract_pak.py extracted/app/data-1080p.pak assets-1080p
-python3 tools/extract_pak.py extracted/app/data-music-OGG_44100.pak assets-music
-python3 tools/extract_pak.py extracted/app/data-sfx-OGG_44100.pak assets-sfx
+# put Crimsonland.2014.rar in vendor/
+make extract   # unpacks rar -> GOG installer -> paks -> vendor/assets*
+make run       # launches with LÖVE (expects ~/Applications/love.app)
 ```
 
 ## Layout
 
-| Path              | Contents                                            |
-|-------------------|-----------------------------------------------------|
-| `extracted/app/`  | Raw GOG installer payload (Windows exe/dll + paks)  |
-| `assets*/`        | Extracted game data (Lua, XML, PNG, OGG)            |
-| `tools/`          | `extract_pak.py` — PAK V11 extractor                |
+| Path                    | Contents                                           |
+|-------------------------|----------------------------------------------------|
+| `main.lua`, `conf.lua`  | LÖVE entry point (+ headless ASCII debug harness)  |
+| `src/engine/`           | Reimplemented 10tons engine runtime (screens, comps, NX_* API) |
+| `src/game/`             | Gameplay reimplementation (quests, creatures, weapons) |
+| `tools/`                | `extract_pak.py` — PAK V11 extractor               |
+| `vendor/`               | Original rar, installer, `extracted/`, `assets*/` (gitignored) |
 
 ## Legal note
 

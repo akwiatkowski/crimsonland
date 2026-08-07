@@ -26,6 +26,11 @@ local RANGE_SCALE = 4 -- projectile_range 300 -> 1200 px
 
 local NUM_CHAPTERS = 7
 
+-- ranged creatures close to this distance, then hold and shoot
+local SHOOTER_STANDOFF = 260
+local SHOOTER_RANGE = 700 -- don't fire from way offscreen
+local MAX_CREATURES = 90 -- hard cap so den spawners can't flood the world
+
 local DIFFICULTY = { NORMAL = 1.0, HARDCORE = 1.5, GRIM = 2.0 }
 
 -- The XML variant stats are late-game values; the original scaled them per
@@ -142,11 +147,14 @@ local function init_session(terrain_chapter)
 
 	game.creatures = {}
 	game.bullets = {}
+	game.ebullets = {} -- creature projectiles (plasma shooter spiders)
 	game.drops = {}
 	game.effects = {} -- active timed powerups: id -> seconds left
 	game.mods = perks.fresh_mods()
 	game.owned_perks = {}
 	game.perk_choices = nil
+	game.pending_perks = 0 -- extra picks queued by Instant Winner & friends
+	game.death_clock = nil -- seconds left once the Death Clock perk is taken
 	particles.clear()
 	game.score = 0
 	game.xp = 0
@@ -192,7 +200,8 @@ function game.start_quest(chapter, quest, difficulty)
 	audio.switch_music("music/crimsonquest", 0, 1)
 end
 
--- survival: creature types join the pool over time
+-- survival: creature types join the pool over time ("Variant_39" is the
+-- plasma-shooter spider; DEN_ALIEN hatches aliens until it is destroyed)
 local SURVIVAL_WAVES = {
 	{ t = 0, "ALIEN", "ZOMBIE" },
 	{ t = 30, "SPIDER1" },
@@ -200,7 +209,8 @@ local SURVIVAL_WAVES = {
 	{ t = 90, "SPIDER2" },
 	{ t = 120, "BEETLE" },
 	{ t = 150, "MAGGOT" },
-	{ t = 180, "CRABFLY" },
+	{ t = 180, "CRABFLY", "Variant_39" },
+	{ t = 210, "DEN_ALIEN" },
 	{ t = 240, "SPIDER_BOSS" },
 }
 
@@ -270,15 +280,48 @@ local function pick_type(pool)
 	return pool[#pool].type
 end
 
+-- a pool/wave id is either a creature type ("ALIEN" -> its base variant)
+-- or an explicit variant id ("Variant_39" -> the plasma-shooter spider)
+local function resolve_variant(id)
+	return data.variants[id] or data.base_variant[id]
+end
+
+--- Instantiate a creature of `variant` at a world position. Behavior state
+-- (shooter cooldowns, den spawn timers, wander headings) is derived from
+-- the variant fields parsed out of creature-variants.xml.
+local function add_creature(game, variant, x, y, is_boss)
+	local c = {
+		variant = variant,
+		def = data.creatures[variant.type],
+		x = x,
+		y = y,
+		hp = variant.health * game.health_mul * (is_boss and quests.BOSS_HP_MUL or 1),
+		anim_t = love.math.random() * 2,
+		attack_cd = 0,
+		is_boss = is_boss or nil,
+	}
+	if variant.weapon_id then
+		c.fire_cd = variant.fire_interval
+			+ love.math.random() * variant.fire_interval_random
+	end
+	if variant.spawn_variant then
+		c.spawn_cd = variant.spawn_interval
+		c.spawned = 0
+		-- nests don't chase; keep whatever facing they spawned with
+		c.fixed_rot = love.math.random() * math.pi * 2
+	end
+	game.creatures[#game.creatures + 1] = c
+	return c
+end
+
 --- Spawn a creature on a ring around the player. Passing a variant makes
 -- it a boss (separate hp scaling, tracked for the win condition).
 local function spawn_creature(game, boss_var)
-	local variant, ctype
+	local variant
 	if boss_var then
-		variant, ctype = boss_var, boss_var.type
+		variant = boss_var
 	else
-		ctype = pick_type(game.pool)
-		variant = data.base_variant[ctype]
+		variant = resolve_variant(pick_type(game.pool))
 	end
 	if not variant then return end
 
@@ -288,17 +331,7 @@ local function spawn_creature(game, boss_var)
 	local x = math.max(32, math.min(WORLD - 32, game.player.x + math.cos(ang) * dist))
 	local y = math.max(32, math.min(WORLD - 32, game.player.y + math.sin(ang) * dist))
 
-	local hp_mul = game.health_mul * (boss_var and quests.BOSS_HP_MUL or 1)
-	game.creatures[#game.creatures + 1] = {
-		variant = variant,
-		def = data.creatures[ctype],
-		x = x,
-		y = y,
-		hp = variant.health * hp_mul,
-		anim_t = love.math.random() * 2,
-		attack_cd = 0,
-		is_boss = boss_var and true or nil,
-	}
+	add_creature(game, variant, x, y, boss_var and true or nil)
 	if boss_var then
 		game.bosses_alive = game.bosses_alive + 1
 		audio.play_sound("sfx/unlocked")
@@ -326,7 +359,7 @@ end
 --- Push the original PickAPerk screen and fill its comps with our choices.
 -- The C++ engine populated these; we do the same from the game layer.
 local function open_perk_screen(game)
-	local choices = perks.offer(3, game.owned_perks)
+	local choices = perks.offer(game.mods.perk_offer, game.owned_perks)
 	if #choices == 0 then -- all perks owned: fall back to a heal
 		game.player.hp = math.min(game.player.max_hp, game.player.hp + 25)
 		return
@@ -392,9 +425,29 @@ local function update_player(game, dt)
 	p.cooldown = math.max(0, p.cooldown - dt)
 	p.muzzle = math.max(0, p.muzzle - dt)
 	if p.reloading > 0 then
-		p.reloading = p.reloading - dt
+		-- Stationary Reloader: hands work faster while standing still
+		local rate = p.moving and 1 or game.mods.stand_reload
+		p.reloading = p.reloading - dt * rate
 		if p.reloading <= 0 then
 			p.ammo = game.clip_size()
+		end
+		-- Angry Reloader: spit fireballs in random directions meanwhile
+		if game.mods.angry_reload then
+			p.angry_cd = (p.angry_cd or 0) - dt
+			if p.angry_cd <= 0 then
+				p.angry_cd = 0.2
+				local a = love.math.random() * math.pi * 2
+				game.bullets[#game.bullets + 1] = {
+					x = p.x + math.cos(a) * 20,
+					y = p.y + math.sin(a) * 20,
+					dx = math.cos(a),
+					dy = math.sin(a),
+					speed = 500,
+					dist_left = 220 + love.math.random() * 80,
+					damage = 12 * game.mods.dmg,
+					fire = true,
+				}
+			end
 		end
 	elseif love.keyboard.isDown("r") and p.ammo < game.clip_size() then
 		p.reloading = p.weapon.reload_time * game.mods.reload
@@ -455,7 +508,8 @@ local function try_drop(game, x, y)
 		end
 	elseif roll < DROP_WEAPON_CHANCE + DROP_HEALTH_CHANCE then
 		game.drops[#game.drops + 1] = { kind = "health", x = x, y = y, t = 0 }
-	elseif roll < DROP_WEAPON_CHANCE + DROP_HEALTH_CHANCE + DROP_POWERUP_CHANCE then
+	elseif roll < DROP_WEAPON_CHANCE + DROP_HEALTH_CHANCE
+		+ DROP_POWERUP_CHANCE * game.mods.powerup_drop then -- Bonus Magnet
 		local pu = POWERUPS[love.math.random(#POWERUPS)]
 		game.drops[#game.drops + 1] = { kind = "powerup", powerup = pu, x = x, y = y, t = 0 }
 	end
@@ -474,7 +528,8 @@ local function activate_powerup(game, pu)
 			end
 		end
 	else
-		game.effects[pu.id] = pu.dur
+		-- Bonus Economist stretches every timed effect
+		game.effects[pu.id] = pu.dur * game.mods.bonus_time
 	end
 end
 
@@ -486,7 +541,8 @@ function damage_creature(game, c, dmg)
 		c.dying = true
 		c.die_t = 0
 		-- freeze facing so the gore anim + baked corpse keep it
-		c.rot = math.atan2(game.player.y - c.y, game.player.x - c.x) + math.pi / 2
+		c.rot = c.fixed_rot
+			or math.atan2(game.player.y - c.y, game.player.x - c.x) + math.pi / 2
 		particles.death_burst(c.x, c.y, c.variant.scale)
 		game.kills = game.kills + 1
 		if c.is_boss then
@@ -553,6 +609,9 @@ local function update_bullets(game, dt)
 							explode(game, b.x, b.y, b.damage)
 						else
 							particles.blood(b.x, b.y, math.atan2(b.dy, b.dx))
+							if game.mods.poison > 0 then
+								c.poison_t = 4 -- refreshed on every hit
+							end
 							damage_creature(game, c, b.damage)
 						end
 						break
@@ -572,6 +631,17 @@ local function update_drops(game, dt)
 		local d = game.drops[i]
 		d.t = d.t + dt
 		local ddx, ddy = p.x - d.x, p.y - d.y
+		-- Telekinetic: pickups within reach crawl toward the player
+		local magnet = game.mods.magnet
+		if magnet > 0 then
+			local dist2 = ddx * ddx + ddy * ddy
+			if dist2 < magnet * magnet and dist2 > 1 then
+				local dist = math.sqrt(dist2)
+				d.x = d.x + ddx / dist * 130 * dt
+				d.y = d.y + ddy / dist * 130 * dt
+				ddx, ddy = p.x - d.x, p.y - d.y
+			end
+		end
 		if ddx * ddx + ddy * ddy < PICKUP_RADIUS * PICKUP_RADIUS then
 			if d.kind == "weapon" then
 				p.weapon = d.weapon
@@ -623,22 +693,88 @@ local function update_creatures(game, dt)
 		else
 			c.anim_t = c.anim_t + dt
 			c.attack_cd = math.max(0, c.attack_cd - dt)
-			-- CLASSIC AI: seek the player
+			-- Poison Bullets: damage-over-time after being shot
+			if c.poison_t then
+				c.poison_t = c.poison_t - dt
+				damage_creature(game, c, game.mods.poison * dt)
+				if c.poison_t <= 0 then c.poison_t = nil end
+			end
+			local v = c.variant
 			local dx, dy = p.x - c.x, p.y - c.y
 			local dist = math.sqrt(dx * dx + dy * dy)
-			local speed = c.variant.speed * SPEED_SCALE
-			if dist > 1 then
+			local speed = v.speed * SPEED_SCALE
+
+			-- movement by XML ai type. Dens/nests are stationary spawners
+			-- regardless of their nominal ai; IDLE stands its ground;
+			-- WANDERER drifts on a random heading; everything else
+			-- (CLASSIC, SIMPLECLASSIC, SIMPLE, RUSH) seeks the player —
+			-- but ranged attackers hold a standoff distance while firing.
+			if c.spawn_cd or v.ai == "IDLE" then
+				-- no movement
+			elseif v.ai == "WANDERER" then
+				c.wander_t = (c.wander_t or 0) - dt
+				if c.wander_t <= 0 then
+					c.wander_t = 1 + love.math.random() * 2
+					c.wander_a = love.math.random() * math.pi * 2
+				end
+				c.x = math.max(32, math.min(WORLD - 32, c.x + math.cos(c.wander_a) * speed * dt))
+				c.y = math.max(32, math.min(WORLD - 32, c.y + math.sin(c.wander_a) * speed * dt))
+			elseif dist > 1 and not (c.fire_cd and dist < SHOOTER_STANDOFF) then
 				c.x = c.x + dx / dist * speed * dt
 				c.y = c.y + dy / dist * speed * dt
 			end
+
+			-- ranged attack: fire the variant's weapon at the player
+			if c.fire_cd and dist < SHOOTER_RANGE then
+				c.fire_cd = c.fire_cd - dt
+				if c.fire_cd <= 0 then
+					c.fire_cd = v.fire_interval
+						+ love.math.random() * v.fire_interval_random
+					local w = data.weapons[v.weapon_id]
+					local a = math.atan2(dy, dx)
+					game.ebullets[#game.ebullets + 1] = {
+						x = c.x + math.cos(a) * 14 * v.scale,
+						y = c.y + math.sin(a) * 14 * v.scale,
+						dx = math.cos(a),
+						dy = math.sin(a),
+						speed = (w and w.projectile_speed or 10) * BULLET_SPEED_SCALE,
+						dist_left = (w and w.projectile_range or 300) * RANGE_SCALE,
+						-- the variant's damage stat is the authored "how much
+						-- this creature hurts" knob (weapon XML damage is 5
+						-- across the board), so scale it like contact damage
+						damage = v.damage * game.damage_mul,
+					}
+				end
+			end
+
+			-- den spawner: hatch minions until the authored cap
+			if c.spawn_cd then
+				c.spawn_cd = c.spawn_cd - dt
+				if c.spawn_cd <= 0 and c.spawned < v.spawn_max
+					and #game.creatures < MAX_CREATURES then
+					c.spawn_cd = v.spawn_interval
+					c.spawned = c.spawned + 1
+					local mv = data.variants[v.spawn_variant]
+					if mv then
+						local a = love.math.random() * math.pi * 2
+						add_creature(game, mv,
+							math.max(32, math.min(WORLD - 32, c.x + math.cos(a) * 30)),
+							math.max(32, math.min(WORLD - 32, c.y + math.sin(a) * 30)))
+					end
+				end
+			end
+
 			-- contact damage (perks: Thick Skinned, Tough Reloader, Radioactive)
-			local touch = 16 * c.variant.scale + 14
+			local touch = 16 * v.scale + 14
 			if dist < touch then
-				if c.attack_cd <= 0 and not game.effects.SHIELD then
+				if c.attack_cd <= 0 and not game.effects.SHIELD
+					and v.damage > 0 then
 					c.attack_cd = 0.8
 					local taken = game.mods.taken
 					if p.reloading > 0 then taken = taken * game.mods.reload_guard end
-					p.hp = p.hp - c.variant.damage * game.damage_mul * taken
+					-- Dodger: chance the bite misses entirely
+					if love.math.random() < game.mods.dodge then taken = 0 end
+					p.hp = p.hp - v.damage * game.damage_mul * taken
 					local snd = c.def and c.def.sounds and c.def.sounds.snd_attack_01
 					if snd and snd ~= "!NONE" then audio.play_sound(snd) end
 				end
@@ -647,6 +783,31 @@ local function update_creatures(game, dt)
 				end
 			end
 		end
+	end
+end
+
+--- Creature projectiles: fly straight, hit the player, blocked by SHIELD.
+local function update_ebullets(game, dt)
+	local p = game.player
+	for i = #game.ebullets, 1, -1 do
+		local b = game.ebullets[i]
+		local step = b.speed * dt
+		b.x = b.x + b.dx * step
+		b.y = b.y + b.dy * step
+		b.dist_left = b.dist_left - step
+		local dead = b.dist_left <= 0
+		if not dead then
+			local ddx, ddy = p.x - b.x, p.y - b.y
+			if ddx * ddx + ddy * ddy < 14 * 14 then
+				dead = true
+				if not game.effects.SHIELD
+					and love.math.random() >= game.mods.dodge then
+					p.hp = p.hp - b.damage * game.mods.taken
+					particles.blood(b.x, b.y, math.atan2(b.dy, b.dx))
+				end
+			end
+		end
+		if dead then table.remove(game.ebullets, i) end
 	end
 end
 
@@ -689,6 +850,7 @@ function game.update(dt)
 	update_player(game, dt)
 	update_bullets(game, dt)
 	update_creatures(game, dt)
+	update_ebullets(game, dt)
 	update_drops(game, dt)
 	particles.update(dt)
 
@@ -724,6 +886,15 @@ function game.update(dt)
 		game.player.hp = math.min(game.player.max_hp, game.player.hp + mods.regen * dt)
 	end
 
+	-- Death Clock: invulnerable, but the countdown always wins
+	if game.death_clock then
+		game.death_clock = game.death_clock - dt
+		if game.death_clock <= 0 then
+			game.death_clock = nil
+			game.player.hp = 0
+		end
+	end
+
 	-- win/lose (survival has no win condition; bosses must die to win)
 	if game.kills_goal and game.kills >= game.kills_goal
 		and game.boss_pending == 0 and game.bosses_alive == 0 then
@@ -735,6 +906,16 @@ function game.update(dt)
 		game.outcome = "lost"
 		game.end_timer = 1.6
 		print("[game] you died")
+		-- Final Revenge: take everyone with you (score still counts)
+		if mods.final_revenge then
+			for _, c in ipairs(game.creatures) do
+				if not c.dying then
+					particles.explosion(c.x, c.y, 60)
+					damage_creature(game, c, 1e6)
+				end
+			end
+			audio.play_sound("sfx/explosion_nuke")
+		end
 		if game.mode == "survival" then
 			game.new_highscore = require("src.game.save").record_survival(
 				game.score, game.time, game.kills)
@@ -830,6 +1011,8 @@ function game.draw()
 		local v = c.variant
 		if frozen and not c.dying then
 			love.graphics.setColor(v.r * 0.5, v.g * 0.7, math.min(1, v.b + 0.5), 1)
+		elseif c.poison_t and not c.dying then
+			love.graphics.setColor(v.r * 0.6, math.min(1, v.g + 0.4), v.b * 0.6, 1)
 		else
 			love.graphics.setColor(v.r, v.g, v.b, 1)
 		end
@@ -845,8 +1028,9 @@ function game.draw()
 			if seq then
 				local speed = def.move_speed or 1
 				local frame = math.floor(c.anim_t * 24 * speed) + 1
-				local rot = math.atan2(game.player.y - c.y, game.player.x - c.x)
-				bms.draw(seq, frame, c.x, c.y, rot + math.pi / 2, v.scale)
+				local rot = c.fixed_rot -- dens/nests don't track the player
+					or math.atan2(game.player.y - c.y, game.player.x - c.x) + math.pi / 2
+				bms.draw(seq, frame, c.x, c.y, rot, v.scale)
 			else
 				love.graphics.circle("fill", c.x, c.y, 14 * v.scale)
 			end
@@ -896,6 +1080,14 @@ function game.draw()
 		end
 	end
 
+	-- creature plasma bolts (green, additive glow)
+	love.graphics.setBlendMode("add")
+	for _, b in ipairs(game.ebullets) do
+		love.graphics.setColor(0.3, 1, 0.4, 0.9)
+		love.graphics.circle("fill", b.x, b.y, 4 + love.math.random() * 1.5)
+	end
+	love.graphics.setBlendMode("alpha")
+
 	particles.draw()
 
 	love.graphics.pop()
@@ -925,6 +1117,11 @@ function game.draw()
 		love.graphics.printf(string.format("%s %.0fs", id, math.ceil(left)),
 			10, ey, 300, "left")
 		ey = ey + 16
+	end
+	if game.death_clock then
+		love.graphics.setColor(1, 0.25, 0.25, 1)
+		love.graphics.printf(string.format("DEATH CLOCK %.1fs", game.death_clock),
+			10, ey, 300, "left")
 	end
 	love.graphics.setColor(1, 1, 1, 1)
 
@@ -989,6 +1186,12 @@ function game.on_ui_click(screen_name, comp_name)
 			print(("[game] perk chosen: %s"):format(perk.name))
 			local screens = require("src.engine.screens")
 			screens.pop("PickAPerk")
+			-- Instant Winner / Fatal Lottery queue further picks (unless
+			-- the lottery just killed the player)
+			if game.pending_perks > 0 and game.player.hp > 0 then
+				game.pending_perks = game.pending_perks - 1
+				open_perk_screen(game)
+			end
 			return true
 		end
 	elseif screen_name == "PlayMenuSurvival" then

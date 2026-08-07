@@ -101,6 +101,7 @@ function data.load_variants()
 			id = a.id,
 			legacy_index = to_num(a.legacy_variant_index, 9999),
 			type = a.type,
+			ai = a.ai or "CLASSIC", -- CLASSIC/SIMPLECLASSIC/SIMPLE/RUSH/WANDERER/IDLE
 			xp = to_num(a.experience_worth, 10),
 			damage = to_num(a.damage, 5),
 			health = to_num(a.health, 10),
@@ -109,6 +110,14 @@ function data.load_variants()
 			r = to_num(a.color_base_r, 1),
 			g = to_num(a.color_base_g, 1),
 			b = to_num(a.color_base_b, 1),
+			-- ranged attackers (e.g. SpiderPlasmaShooter) carry a weapon ref
+			weapon_id = a.weapon_id,
+			fire_interval = to_num(a.weapon_fire_interval, 1),
+			fire_interval_random = to_num(a.weapon_fire_interval_random, 0),
+			-- den/nest variants spawn other variants over time
+			spawn_max = to_num(a.spawner_max_creatures_to_spawn, 0),
+			spawn_interval = to_num(a.spawner_spawn_interval, 0),
+			spawn_variant = a.spawner_creature_variant_to_spawn,
 		}
 		data.variants[v.id] = v
 		local cur = data.base_variant[v.type]

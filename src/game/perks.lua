@@ -107,6 +107,113 @@ perks.list = {
 		icon = "perks/perk_12.png",
 		apply = function(mods) mods.touch_burn = (mods.touch_burn or 0) + 6 end,
 	},
+	-- ---- classic gamble / trade-off perks (numbers are clean-room
+	-- approximations; the original values were compiled into prog.dll)
+	{
+		id = "PERK_EXPERT",
+		name = "Perk Expert",
+		desc = "You know your talents: choose from four perks instead of three.",
+		icon = "perks/perk_13.png",
+		apply = function(mods) mods.perk_offer = 4 end,
+	},
+	{
+		id = "PERK_MASTER",
+		name = "Perk Master",
+		desc = "A true connoisseur of self-improvement: choose from five perks.",
+		icon = "perks/perk_14.png",
+		requires = "PERK_EXPERT",
+		apply = function(mods) mods.perk_offer = 5 end,
+	},
+	{
+		id = "INSTANT_WINNER",
+		name = "Instant Winner",
+		desc = "You immediately gain another level. This one's free.",
+		icon = "perks/perk_15.png",
+		apply = function(mods, game)
+			game.level = game.level + 1
+			game.pending_perks = game.pending_perks + 1
+		end,
+	},
+	{
+		id = "FATAL_LOTTERY",
+		name = "Fatal Lottery",
+		desc = "Even odds: drop dead on the spot, or gain three levels.",
+		icon = "perks/perk_16.png",
+		apply = function(mods, game)
+			if love.math.random() < 0.5 then
+				game.player.hp = 0
+			else
+				game.level = game.level + 3
+				game.pending_perks = game.pending_perks + 3
+			end
+		end,
+	},
+	{
+		id = "DEATH_CLOCK",
+		name = "Death Clock",
+		desc = "Nothing can hurt you any more. In 25 seconds, you die.",
+		icon = "perks/perk_17.png",
+		apply = function(mods, game)
+			mods.taken = 0
+			game.death_clock = 25
+		end,
+	},
+	{
+		id = "FINAL_REVENGE",
+		name = "Final Revenge",
+		desc = "When you die, everything on the field dies with you.",
+		icon = "perks/perk_18.png",
+		apply = function(mods) mods.final_revenge = true end,
+	},
+	{
+		id = "DODGER",
+		name = "Dodger",
+		desc = "You have a 20% chance to dodge any attack.",
+		icon = "perks/perk_19.png",
+		apply = function(mods) mods.dodge = mods.dodge + 0.2 end,
+	},
+	{
+		id = "POISON_BULLETS",
+		name = "Poison Bullets",
+		desc = "Your shots poison creatures, which keep hurting after you stop.",
+		icon = "perks/perk_20.png",
+		apply = function(mods) mods.poison = mods.poison + 4 end, -- dps, 4s
+	},
+	{
+		id = "ANGRY_RELOADER",
+		name = "Angry Reloader",
+		desc = "Reloading makes you furious: you spit fireballs while you do it.",
+		icon = "perks/perk_21.png",
+		apply = function(mods) mods.angry_reload = true end,
+	},
+	{
+		id = "STATIONARY_RELOADER",
+		name = "Stationary Reloader",
+		desc = "Stand still and your hands work twice as fast on the reload.",
+		icon = "perks/perk_22.png",
+		apply = function(mods) mods.stand_reload = 2 end,
+	},
+	{
+		id = "TELEKINETIC",
+		name = "Telekinetic",
+		desc = "Bonuses and weapons crawl across the floor toward you.",
+		icon = "perks/perk_23.png",
+		apply = function(mods) mods.magnet = 140 end, -- attraction radius, px
+	},
+	{
+		id = "BONUS_ECONOMIST",
+		name = "Bonus Economist",
+		desc = "You stretch a good thing: timed bonuses last 50% longer.",
+		icon = "perks/perk_24.png",
+		apply = function(mods) mods.bonus_time = mods.bonus_time * 1.5 end,
+	},
+	{
+		id = "BONUS_MAGNET",
+		name = "Bonus Magnet",
+		desc = "Creatures drop bonuses twice as often around you.",
+		icon = "perks/perk_25.png",
+		apply = function(mods) mods.powerup_drop = mods.powerup_drop * 2 end,
+	},
 }
 
 function perks.fresh_mods()
@@ -114,14 +221,20 @@ function perks.fresh_mods()
 		dmg = 1, fire = 1, reload = 1, speed = 1, clip = 1, xp = 1,
 		taken = 1, regen = 0, kill_heal = 0, heal_mul = 1,
 		reload_guard = 1, touch_burn = 0,
+		perk_offer = 3, dodge = 0, poison = 0, bonus_time = 1,
+		powerup_drop = 1, magnet = 0, stand_reload = 1,
+		angry_reload = false, final_revenge = false,
 	}
 end
 
---- Pick `n` random perks the player does not own yet.
+--- Pick `n` random perks the player does not own yet. Perks with a
+-- `requires` field only enter the pool once their prerequisite is owned.
 function perks.offer(n, owned)
 	local pool = {}
 	for _, p in ipairs(perks.list) do
-		if not owned[p.id] then pool[#pool + 1] = p end
+		if not owned[p.id] and (not p.requires or owned[p.requires]) then
+			pool[#pool + 1] = p
+		end
 	end
 	-- Fisher-Yates prefix shuffle
 	for i = 1, math.min(n, #pool) do

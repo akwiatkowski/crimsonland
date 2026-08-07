@@ -99,6 +99,8 @@ function harness.install(scenario_name)
 
 	-- keep the test window out of the user's way (best effort)
 	pcall(love.window.minimize)
+	-- and out of the user's ears: master-mute, game code never notices
+	love.audio.setVolume(0)
 
 	local elapsed = 0
 	local step_idx = 1

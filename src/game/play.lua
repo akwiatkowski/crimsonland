@@ -7,6 +7,7 @@ local assets = require("src.engine.assets")
 local audio = require("src.engine.audio")
 local bms = require("src.game.bms")
 local data = require("src.game.data")
+local particles = require("src.game.particles")
 
 local game = {}
 
@@ -128,7 +129,7 @@ function game.start_quest(chapter, quest, difficulty)
 
 	game.creatures = {}
 	game.bullets = {}
-	game.gore = {} -- dying creature animations
+	particles.clear()
 	game.score = 0
 	game.xp = 0
 	game.level = 1
@@ -264,9 +265,13 @@ local function update_bullets(game, dt)
 				if ddx * ddx + ddy * ddy < r * r then
 					c.hp = c.hp - b.damage
 					dead = true
+					particles.blood(b.x, b.y, math.atan2(b.dy, b.dx))
 					if c.hp <= 0 and not c.dying then
 						c.dying = true
 						c.die_t = 0
+						-- freeze facing so the gore anim + baked corpse keep it
+						c.rot = math.atan2(game.player.y - c.y, game.player.x - c.x) + math.pi / 2
+						particles.death_burst(c.x, c.y, c.variant.scale)
 						game.kills = game.kills + 1
 						game.score = game.score + c.variant.xp
 						game.xp = game.xp + c.variant.xp
@@ -300,6 +305,16 @@ local function update_creatures(game, dt)
 			local seq = def and def.die and bms.load(def.die)
 			local frames = seq and seq.count or 24
 			if c.die_t * 24 * speed >= frames then
+				-- bake the corpse (final gore frame) into the terrain so the
+				-- battlefield accumulates the classic Crimsonland blood carpet
+				if seq then
+					love.graphics.setCanvas(game.terrain)
+					local v = c.variant
+					love.graphics.setColor(v.r, v.g, v.b, 1)
+					bms.draw(seq, seq.count, c.x, c.y, c.rot or 0, v.scale)
+					love.graphics.setColor(1, 1, 1, 1)
+					love.graphics.setCanvas()
+				end
 				table.remove(game.creatures, i)
 			end
 		else
@@ -344,6 +359,7 @@ function game.update(dt)
 	update_player(game, dt)
 	update_bullets(game, dt)
 	update_creatures(game, dt)
+	particles.update(dt)
 
 	-- spawner
 	game.spawn_timer = game.spawn_timer - dt
@@ -415,7 +431,7 @@ function game.draw()
 			if seq then
 				local speed = def.die_speed or 1
 				local frame = math.min(seq.count, math.floor(c.die_t * 24 * speed) + 1)
-				bms.draw(seq, frame, c.x, c.y, 0, v.scale)
+				bms.draw(seq, frame, c.x, c.y, c.rot or 0, v.scale)
 			end
 		else
 			local seq = def and def.move and bms.load(def.move)
@@ -464,6 +480,8 @@ function game.draw()
 	for _, b in ipairs(game.bullets) do
 		love.graphics.circle("fill", b.x, b.y, 2.5)
 	end
+
+	particles.draw()
 
 	love.graphics.pop()
 

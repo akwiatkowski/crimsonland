@@ -173,16 +173,20 @@ function game.start_quest(chapter, quest, difficulty)
 	game.difficulty = difficulty
 	init_session(chapter)
 
+	local def = quests.get(chapter, quest)
 	-- highest weapon index that may drop; grows with chapter progress
 	game.weapon_cap = math.min(30, 6 + 5 * (chapter - 1))
-	game.kills_goal = 15 + 10 * quest + 5 * (chapter - 1) * 10
-	game.spawn_interval = math.max(0.4, 2.2 - 0.15 * quest - 0.2 * (chapter - 1))
-	game.max_concurrent = math.min(40, 4 + 2 * quest + 3 * (chapter - 1))
+	game.kills_goal = def.kills_goal
+	game.spawn_interval = def.spawn_interval
+	game.max_concurrent = def.max_concurrent
+	game.pool = def.pool
 	game.diff_mul = diff_mul
 	game.health_mul, game.damage_mul = progression_muls(chapter, quest, diff_mul)
 
-	-- creature type pool for this chapter
-	game.pool = CHAPTER_CREATURES[math.min(chapter, #CHAPTER_CREATURES)]
+	-- boss encounter: spawns at 60% of the kill goal, must die to win
+	game.boss_pending = def.boss and def.boss.count or 0
+	game.boss_variant = def.boss and def.boss.variant or nil
+	game.bosses_alive = 0
 
 	game.active = true
 	audio.switch_music("music/crimsonquest", 0, 1)
@@ -213,7 +217,10 @@ function game.start_survival()
 	game.spawn_interval = 1.8
 	game.max_concurrent = 6
 	game.health_mul, game.damage_mul = HEALTH_SCALE_BASE, DAMAGE_SCALE_BASE
-	game.pool = { "ALIEN", "ZOMBIE" }
+	game.pool = { { type = "ALIEN", w = 1 }, { type = "ZOMBIE", w = 1 } }
+	game.boss_pending = 0
+	game.boss_variant = nil
+	game.bosses_alive = 0
 
 	game.active = true
 	audio.switch_music("music/crimsonquest", 0, 1)
@@ -230,7 +237,9 @@ local function update_survival_ramp(game)
 	local pool = {}
 	for _, wave in ipairs(SURVIVAL_WAVES) do
 		if t >= wave.t then
-			for _, ctype in ipairs(wave) do pool[#pool + 1] = ctype end
+			for _, ctype in ipairs(wave) do
+				pool[#pool + 1] = { type = ctype, w = 1 }
+			end
 		end
 	end
 	game.pool = pool
@@ -249,10 +258,28 @@ end
 
 -- ------------------------------------------------------------ spawning
 
-local function spawn_creature(game)
-	local types = game.pool
-	local ctype = types[love.math.random(#types)]
-	local variant = data.base_variant[ctype]
+-- weighted pick from the pool ({type=, w=} entries)
+local function pick_type(pool)
+	local total = 0
+	for _, e in ipairs(pool) do total = total + e.w end
+	local roll = love.math.random() * total
+	for _, e in ipairs(pool) do
+		roll = roll - e.w
+		if roll <= 0 then return e.type end
+	end
+	return pool[#pool].type
+end
+
+--- Spawn a creature on a ring around the player. Passing a variant makes
+-- it a boss (separate hp scaling, tracked for the win condition).
+local function spawn_creature(game, boss_var)
+	local variant, ctype
+	if boss_var then
+		variant, ctype = boss_var, boss_var.type
+	else
+		ctype = pick_type(game.pool)
+		variant = data.base_variant[ctype]
+	end
 	if not variant then return end
 
 	-- spawn on a ring around the player, clamped into the world
@@ -261,15 +288,22 @@ local function spawn_creature(game)
 	local x = math.max(32, math.min(WORLD - 32, game.player.x + math.cos(ang) * dist))
 	local y = math.max(32, math.min(WORLD - 32, game.player.y + math.sin(ang) * dist))
 
+	local hp_mul = game.health_mul * (boss_var and quests.BOSS_HP_MUL or 1)
 	game.creatures[#game.creatures + 1] = {
 		variant = variant,
 		def = data.creatures[ctype],
 		x = x,
 		y = y,
-		hp = variant.health * game.health_mul,
+		hp = variant.health * hp_mul,
 		anim_t = love.math.random() * 2,
 		attack_cd = 0,
+		is_boss = boss_var and true or nil,
 	}
+	if boss_var then
+		game.bosses_alive = game.bosses_alive + 1
+		audio.play_sound("sfx/unlocked")
+		print(("[game] boss incoming: %s"):format(variant.id))
+	end
 end
 
 -- --------------------------------------------------------- perk choosing
@@ -455,6 +489,10 @@ function damage_creature(game, c, dmg)
 		c.rot = math.atan2(game.player.y - c.y, game.player.x - c.x) + math.pi / 2
 		particles.death_burst(c.x, c.y, c.variant.scale)
 		game.kills = game.kills + 1
+		if c.is_boss then
+			game.bosses_alive = game.bosses_alive - 1
+			print("[game] boss down!")
+		end
 		local points_mul = game.effects.DOUBLE_POINTS and 2 or 1
 		game.score = game.score + c.variant.xp * points_mul
 		game.xp = game.xp + c.variant.xp * game.mods.xp * points_mul
@@ -654,6 +692,13 @@ function game.update(dt)
 	update_drops(game, dt)
 	particles.update(dt)
 
+	-- boss entrance at 60% of the kill goal
+	if game.boss_pending > 0 and game.kills_goal
+		and game.kills >= game.kills_goal * 0.6 then
+		game.boss_pending = game.boss_pending - 1
+		spawn_creature(game, game.boss_variant)
+	end
+
 	-- spawner (quest mode stops spawning once enough kills are in flight)
 	game.spawn_timer = game.spawn_timer - dt
 	local under_goal = not game.kills_goal
@@ -679,8 +724,9 @@ function game.update(dt)
 		game.player.hp = math.min(game.player.max_hp, game.player.hp + mods.regen * dt)
 	end
 
-	-- win/lose (survival has no win condition)
-	if game.kills_goal and game.kills >= game.kills_goal then
+	-- win/lose (survival has no win condition; bosses must die to win)
+	if game.kills_goal and game.kills >= game.kills_goal
+		and game.boss_pending == 0 and game.bosses_alive == 0 then
 		game.outcome = "won"
 		game.end_timer = 1.2
 		print("[game] quest completed!")
@@ -900,7 +946,23 @@ function game.on_ui_click(screen_name, comp_name)
 		if ch then
 			selected_chapter = tonumber(ch)
 			local screens = require("src.engine.screens")
-			screens.push("PlayMenuQuests")
+			local comps = require("src.engine.comps")
+			local s = screens.push("PlayMenuQuests")
+			-- fill the header the C++ engine used to populate
+			data.load_chapters()
+			local ROMAN = { "I", "II", "III", "IV", "V", "VI", "VII" }
+			local info = data.chapters[selected_chapter]
+			local function put(name, text)
+				if s.compmap[name] then
+					comps.set(s.compmap[name], "textbox.text", { text })
+				end
+			end
+			put("ChapterName", ("%s - %s"):format(
+				ROMAN[selected_chapter] or selected_chapter,
+				info and info.name or ""))
+			put("Difficulty", selected_difficulty:sub(1, 1)
+				.. selected_difficulty:sub(2):lower())
+			put("QuestName", "")
 			return true
 		end
 		local diff = comp_name:match("^Difficulty_(%u+)$")
@@ -942,7 +1004,7 @@ function game.on_ui_click(screen_name, comp_name)
 		if comp_name == "PlayNext" then
 			local chapter, quest = game.chapter, game.quest + 1
 			if quest > 10 then chapter, quest = chapter + 1, 1 end
-			if chapter > #CHAPTER_CREATURES then
+			if chapter > NUM_CHAPTERS then
 				game.to_main_menu()
 			else
 				game.start_quest(chapter, quest, game.difficulty)

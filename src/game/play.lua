@@ -214,8 +214,11 @@ local SURVIVAL_WAVES = {
 	{ t = 240, "SPIDER_BOSS" },
 }
 
-function game.start_survival()
-	game.mode = "survival"
+--- Start any endless mode ("survival" default; "blitz" is survival at
+-- 2.5x ramp speed; "rush", "waves", "nukefism", "weaponpicker" have their
+-- own rules). Mode rules are clean-room recreations of the originals.
+function game.start_survival(mode)
+	game.mode = mode or "survival"
 	game.chapter = 1
 	game.quest = 0
 	game.difficulty = "NORMAL"
@@ -231,14 +234,42 @@ function game.start_survival()
 	game.boss_pending = 0
 	game.boss_variant = nil
 	game.bosses_alive = 0
+	game.no_drops = nil
+	game.no_perks = nil
+	game.no_weapon_drops = nil
+	game.field_spawn_cd = nil
+
+	if game.mode == "rush" then
+		-- one rifle, no pickups, no perks; just you and the swarm
+		game.player.weapon = data.weapons.ASSAULT_RIFLE or game.player.weapon
+		game.player.ammo = game.player.weapon.clip_size
+		game.no_drops = true
+		game.no_perks = true
+		game.pool = { { type = "ALIEN", w = 1 } }
+		game.spawn_interval = 0.9
+		game.max_concurrent = 12
+	elseif game.mode == "waves" then
+		game.wave = 0
+		game.wave_queue = 0
+		game.max_concurrent = 0 -- generic spawner off; waves spawn directly
+	elseif game.mode == "nukefism" then
+		-- no gun, ever: survive on the powerups seeding the field
+		game.player.weapon = nil
+		game.no_weapon_drops = true
+		game.field_spawn_cd = 1.5
+	elseif game.mode == "weaponpicker" then
+		-- a fresh weapon lands nearby every few seconds; grabbing one scores
+		game.field_spawn_cd = 4
+	end
 
 	game.active = true
 	audio.switch_music("music/crimsonquest", 0, 1)
 end
 
 -- difficulty/pool ramp, recomputed from elapsed time every frame
+-- (blitz is survival with the clock running 2.5x faster)
 local function update_survival_ramp(game)
-	local t = game.time
+	local t = game.time * (game.mode == "blitz" and 2.5 or 1)
 	game.spawn_interval = math.max(0.3, 1.8 - t * 0.02)
 	game.max_concurrent = math.min(60, 6 + math.floor(t * 0.4))
 	game.weapon_cap = math.min(30, 6 + math.floor(t / 25))
@@ -254,6 +285,17 @@ local function update_survival_ramp(game)
 	end
 	game.pool = pool
 end
+
+-- rush: an accelerating wall of aliens, nothing else
+local function update_rush_ramp(game)
+	local t = game.time
+	game.spawn_interval = math.max(0.12, 0.9 - t * 0.015)
+	game.max_concurrent = math.min(MAX_CREATURES - 10, 12 + math.floor(t * 0.8))
+	game.health_mul = HEALTH_SCALE_BASE * (1 + t / 120)
+	game.damage_mul = DAMAGE_SCALE_BASE * (1 + t / 240)
+end
+
+-- (waves/field-spawn updates live below the spawning section they use)
 
 --- Escape during gameplay: open the pause screen (gameplay pauses
 -- automatically while any screen overlays GameCrimsonland).
@@ -339,11 +381,74 @@ local function spawn_creature(game, boss_var)
 	end
 end
 
+-- waves mode: one creature type at a time, growing packs, field must clear
+local WAVE_TYPES = {
+	"ALIEN", "ZOMBIE", "SPIDER1", "LIZARD", "SPIDER2",
+	"BEETLE", "MAGGOT", "CRABFLY",
+}
+
+local function update_waves_mode(game, dt)
+	game.health_mul = HEALTH_SCALE_BASE * (1 + (game.wave - 1) * 0.12)
+	game.damage_mul = DAMAGE_SCALE_BASE * (1 + (game.wave - 1) * 0.06)
+	game.weapon_cap = math.min(30, 6 + game.wave * 2)
+	if game.wave_queue > 0 then
+		game.wave_spawn_cd = (game.wave_spawn_cd or 0) - dt
+		if game.wave_spawn_cd <= 0 and #game.creatures < MAX_CREATURES then
+			game.wave_spawn_cd = 0.25
+			game.wave_queue = game.wave_queue - 1
+			local saved = game.pool
+			game.pool = { { type = game.wave_type, w = 1 } }
+			spawn_creature(game)
+			game.pool = saved
+		end
+	else
+		-- field clear (gore may still be playing) -> brief breather, next wave
+		local alive = 0
+		for _, c in ipairs(game.creatures) do
+			if not c.dying then alive = alive + 1 end
+		end
+		if alive == 0 then
+			game.wave_pause = (game.wave_pause or 2) - dt
+			if game.wave_pause <= 0 then
+				game.wave_pause = nil
+				game.wave = game.wave + 1
+				game.wave_type = WAVE_TYPES[(game.wave - 1) % #WAVE_TYPES + 1]
+				game.wave_queue = 5 + game.wave * 3
+				audio.play_sound("sfx/unlocked")
+				print(("[game] wave %d: %s x%d"):format(
+					game.wave, game.wave_type, game.wave_queue))
+			end
+		end
+	end
+end
+
+-- nukefism/weaponpicker: goodies materialize on the field on a timer
+local function update_field_spawns(game, dt)
+	game.field_spawn_cd = game.field_spawn_cd - dt
+	if game.field_spawn_cd > 0 then return end
+	local ang = love.math.random() * math.pi * 2
+	local dist = 120 + love.math.random() * 260
+	local x = math.max(32, math.min(WORLD - 32, game.player.x + math.cos(ang) * dist))
+	local y = math.max(32, math.min(WORLD - 32, game.player.y + math.sin(ang) * dist))
+	if game.mode == "nukefism" then
+		game.field_spawn_cd = 3.5
+		local pu = POWERUPS[love.math.random(#POWERUPS)]
+		game.drops[#game.drops + 1] = { kind = "powerup", powerup = pu, x = x, y = y, t = 0 }
+	else -- weaponpicker
+		game.field_spawn_cd = 5
+		local w = data.weapon_order[love.math.random(2, game.weapon_cap)]
+		if w then
+			game.drops[#game.drops + 1] = { kind = "weapon", weapon = w, x = x, y = y, t = 0 }
+		end
+	end
+end
+
 -- --------------------------------------------------------- perk choosing
 
---- effective clip size with perk modifiers
+--- effective clip size with perk modifiers (0 when unarmed: nukefism)
 function game.clip_size()
-	return math.floor(game.player.weapon.clip_size * game.mods.clip + 0.5)
+	local w = game.player.weapon
+	return w and math.floor(w.clip_size * game.mods.clip + 0.5) or 0
 end
 
 local function set_perk_desc(screen, perk)
@@ -421,7 +526,8 @@ local function update_player(game, dt)
 	local camx, camy = game.camera()
 	p.angle = math.atan2(ry + camy - p.y, rx + camx - p.x)
 
-	-- weapon
+	-- weapon (nukefism plays unarmed)
+	if not p.weapon then return end
 	p.cooldown = math.max(0, p.cooldown - dt)
 	p.muzzle = math.max(0, p.muzzle - dt)
 	if p.reloading > 0 then
@@ -494,8 +600,9 @@ local damage_creature -- forward declaration: nuke pickups kill via drops code
 
 -- roll the drop table where a creature died
 local function try_drop(game, x, y)
+	if game.no_drops then return end -- rush: no help is coming
 	local roll = love.math.random()
-	if roll < DROP_WEAPON_CHANCE then
+	if roll < DROP_WEAPON_CHANCE and not game.no_weapon_drops then
 		-- random weapon up to the current cap, never the one in hand
 		local pool = {}
 		for idx = 2, game.weapon_cap do
@@ -551,7 +658,9 @@ function damage_creature(game, c, dmg)
 		end
 		local points_mul = game.effects.DOUBLE_POINTS and 2 or 1
 		game.score = game.score + c.variant.xp * points_mul
-		game.xp = game.xp + c.variant.xp * game.mods.xp * points_mul
+		if not game.no_perks then -- rush: score only, no levelling
+			game.xp = game.xp + c.variant.xp * game.mods.xp * points_mul
+		end
 		if game.mods.kill_heal > 0 then
 			game.player.hp = math.min(game.player.max_hp,
 				game.player.hp + game.mods.kill_heal)
@@ -649,6 +758,9 @@ local function update_drops(game, dt)
 				p.cooldown = 0
 				p.ammo = game.clip_size()
 				audio.play_sound("sfx/unlock_weapon")
+				if game.mode == "weaponpicker" then
+					game.score = game.score + 500 -- that's the point
+				end
 			elseif d.kind == "powerup" then
 				activate_powerup(game, d.powerup)
 			else
@@ -837,8 +949,15 @@ function game.update(dt)
 		return
 	end
 
-	if game.mode == "survival" then
-		update_survival_ramp(game)
+	if game.mode == "rush" then
+		update_rush_ramp(game)
+	elseif game.mode == "waves" then
+		update_waves_mode(game, dt)
+	elseif game.mode ~= "quest" then
+		update_survival_ramp(game) -- survival, blitz, nukefism, weaponpicker
+	end
+	if game.field_spawn_cd then
+		update_field_spawns(game, dt)
 	end
 
 	-- timed powerup effects tick down
@@ -928,7 +1047,7 @@ end
 function game.open_end_screen()
 	local screens = require("src.engine.screens")
 	local comps = require("src.engine.comps")
-	if game.mode == "survival" then
+	if game.mode ~= "quest" then -- every endless mode ends on this screen
 		local s = screens.push("SurvivalOver")
 		-- fill the stats the layout displays (C++ did this originally)
 		local function put(name, text)
@@ -942,7 +1061,8 @@ function game.open_end_screen()
 		put("Kills", string.format("%d", game.kills))
 		put("Accuracy", string.format("%d%%",
 			game.shots > 0 and math.floor(game.hits / game.shots * 100 + 0.5) or 0))
-		put("WeaponName", game.player.weapon.name or game.player.weapon.id)
+		local w = game.player.weapon
+		put("WeaponName", w and (w.name or w.id) or "Bare Hands")
 		if s.compmap.NewLocalHighscore then
 			comps.set(s.compmap.NewLocalHighscore, "visible",
 				{ game.new_highscore == true })
@@ -1095,19 +1215,25 @@ function game.draw()
 	-- HUD (screen space)
 	love.graphics.setColor(1, 1, 1, 1)
 	love.graphics.printf(string.format("HP %d", math.max(0, math.floor(p.hp))), 10, 10, 200, "left")
-	love.graphics.printf(string.format("%s  %d/%d%s", p.weapon.name or p.weapon.id,
-		p.ammo, game.clip_size(),
-		p.reloading > 0 and " (reloading)" or ""), 10, 30, 400, "left")
-	if game.mode == "survival" then
-		love.graphics.printf(string.format("KILLS %d   SCORE %d   LEVEL %d",
-			game.kills, game.score, game.level), 10, 50, 600, "left")
-		love.graphics.printf(string.format("SURVIVAL  %d:%02d",
-			math.floor(game.time / 60), math.floor(game.time % 60)),
-			SCREEN_W - 210, 10, 200, "right")
-	else
+	love.graphics.printf(p.weapon
+		and string.format("%s  %d/%d%s", p.weapon.name or p.weapon.id,
+			p.ammo, game.clip_size(),
+			p.reloading > 0 and " (reloading)" or "")
+		or "BARE HANDS", 10, 30, 400, "left")
+	if game.mode == "quest" then
 		love.graphics.printf(string.format("KILLS %d/%d   SCORE %d   LEVEL %d",
 			game.kills, game.kills_goal, game.score, game.level), 10, 50, 600, "left")
 		love.graphics.printf(string.format("QUEST %d.%d (%s)", game.chapter, game.quest, game.difficulty),
+			SCREEN_W - 210, 10, 200, "right")
+	else
+		love.graphics.printf(string.format("KILLS %d   SCORE %d   LEVEL %d",
+			game.kills, game.score, game.level), 10, 50, 600, "left")
+		local label = game.mode:upper()
+		if game.mode == "waves" then
+			label = string.format("WAVE %d", math.max(1, game.wave))
+		end
+		love.graphics.printf(string.format("%s  %d:%02d", label,
+			math.floor(game.time / 60), math.floor(game.time % 60)),
 			SCREEN_W - 210, 10, 200, "right")
 	end
 	-- active powerup timers
@@ -1195,11 +1321,18 @@ function game.on_ui_click(screen_name, comp_name)
 			return true
 		end
 	elseif screen_name == "PlayMenuSurvival" then
-		if comp_name == "Play_SURVIVAL" then
-			game.start_survival()
+		local MODE_BUTTONS = {
+			Play_SURVIVAL = "survival", Play_RUSH = "rush",
+			Play_BLITZ = "blitz", Play_WAVES = "waves",
+			Play_NUKEFISM = "nukefism", Play_WEAPONPICKER = "weaponpicker",
+		}
+		local m = MODE_BUTTONS[comp_name]
+		if m then
+			game.start_survival(m)
 			require("src.engine.timeline").begin("Game")
 			return true
 		elseif comp_name:match("^Play_") then
+			-- Typ'o'Shooter: locked in the original menu too
 			print(("[game] mode %s not implemented yet"):format(comp_name))
 			return true
 		end
@@ -1233,7 +1366,7 @@ function game.on_ui_click(screen_name, comp_name)
 		end
 	elseif screen_name == "SurvivalOver" then
 		if comp_name == "PlayAgain" then
-			game.start_survival()
+			game.start_survival(game.mode)
 			require("src.engine.timeline").begin("Game")
 			return true
 		elseif comp_name == "PlayMenu" or comp_name == "HighScores" then

@@ -175,8 +175,10 @@ API.PopAllScreens = function()
 	for _, s in ipairs(screens.stack) do s.leaving = true end
 end
 
+-- peek from the TOP of the stack: i=0 is the topmost screen. The scripts'
+-- GetStackDepthOffset() depends on this to push covered panels down/away.
 API.PeekScreen = function(i)
-	local s = screens.stack[(i or 0) + 1]
+	local s = screens.stack[#screens.stack - (i or 0)]
 	return s and s.name or nil
 end
 API.GetNumberOfScreensInStack = function() return #screens.stack end

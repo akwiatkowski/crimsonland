@@ -38,13 +38,13 @@ Done:
       quest results use LevelCompleted/LevelFailed (Play Next / Retry)
 - [x] Persistence: profiles, completed quests, survival high score
 
+- [x] Pause menu (Esc), timed powerups (nuke/freeze/shield/points/speed/fire),
+      authored quest definitions with chapter palettes and quest-10 bosses
+
 Next:
 
 - [ ] Original `fxs/` particle DSL interpreter (current FX layer is hand-rolled)
-- [ ] Real quest definitions (kill-count table is an approximation — original
-      quest setups were compiled into `prog.dll`, only `custom-quests/` ships as XML)
 - [ ] Remaining survival submodes (Rush, Weapon Picker, Nukefism, Blitz, Waves)
-- [ ] Powerup pickups beyond drops (nuke, freeze, fire ring — `powerups/` art ships)
 - [ ] Quest unlock gating + HighScores/Statistics screens fed from the save data
 
 ## Rebuilding from scratch

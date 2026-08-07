@@ -113,15 +113,10 @@ end
 
 -- ------------------------------------------------------------ quest setup
 
-function game.start_quest(chapter, quest, difficulty)
+-- state shared by every game mode
+local function init_session(terrain_chapter)
 	data.load_all() -- idempotent-ish (cheap enough)
-	difficulty = difficulty or "NORMAL"
-	local diff_mul = DIFFICULTY[difficulty] or 1
-
-	game.chapter = chapter
-	game.quest = quest
-	game.difficulty = difficulty
-	game.terrain = bake_terrain("CHAPTER_" .. chapter)
+	game.terrain = bake_terrain("CHAPTER_" .. terrain_chapter)
 
 	game.player = {
 		x = WORLD / 2,
@@ -138,7 +133,6 @@ function game.start_quest(chapter, quest, difficulty)
 		cooldown = 0,
 		muzzle = 0,
 	}
-	game.player.ammo = game.player.weapon and game.player.weapon.clip_size or 0
 
 	game.creatures = {}
 	game.bullets = {}
@@ -146,29 +140,93 @@ function game.start_quest(chapter, quest, difficulty)
 	game.mods = perks.fresh_mods()
 	game.owned_perks = {}
 	game.perk_choices = nil
-	-- highest weapon index that may drop; grows with chapter progress
-	game.weapon_cap = math.min(30, 6 + 5 * (chapter - 1))
 	particles.clear()
 	game.score = 0
 	game.xp = 0
 	game.level = 1
 	game.xp_next = 500 -- variant xp worth is 50-450; first level ~4 kills
 	game.kills = 0
-	game.kills_goal = 15 + 10 * quest + 5 * (chapter - 1) * 10
+	game.shots = 0
+	game.hits = 0
 	game.spawn_timer = 0
+	game.outcome = nil -- "won" | "lost"
+	game.end_timer = nil
+	game.end_screen_pushed = nil
+	game.time = 0
+	game.player.ammo = game.player.weapon and game.player.weapon.clip_size or 0
+end
+
+function game.start_quest(chapter, quest, difficulty)
+	difficulty = difficulty or "NORMAL"
+	local diff_mul = DIFFICULTY[difficulty] or 1
+
+	game.mode = "quest"
+	game.chapter = chapter
+	game.quest = quest
+	game.difficulty = difficulty
+	init_session(chapter)
+
+	-- highest weapon index that may drop; grows with chapter progress
+	game.weapon_cap = math.min(30, 6 + 5 * (chapter - 1))
+	game.kills_goal = 15 + 10 * quest + 5 * (chapter - 1) * 10
 	game.spawn_interval = math.max(0.4, 2.2 - 0.15 * quest - 0.2 * (chapter - 1))
 	game.max_concurrent = math.min(40, 4 + 2 * quest + 3 * (chapter - 1))
 	game.diff_mul = diff_mul
 	game.health_mul, game.damage_mul = progression_muls(chapter, quest, diff_mul)
-	game.outcome = nil -- "won" | "lost"
-	game.end_timer = nil
-	game.time = 0
 
 	-- creature type pool for this chapter
 	game.pool = CHAPTER_CREATURES[math.min(chapter, #CHAPTER_CREATURES)]
 
 	game.active = true
 	audio.switch_music("music/crimsonquest", 0, 1)
+end
+
+-- survival: creature types join the pool over time
+local SURVIVAL_WAVES = {
+	{ t = 0, "ALIEN", "ZOMBIE" },
+	{ t = 30, "SPIDER1" },
+	{ t = 60, "LIZARD" },
+	{ t = 90, "SPIDER2" },
+	{ t = 120, "BEETLE" },
+	{ t = 150, "MAGGOT" },
+	{ t = 180, "CRABFLY" },
+	{ t = 240, "SPIDER_BOSS" },
+}
+
+function game.start_survival()
+	game.mode = "survival"
+	game.chapter = 1
+	game.quest = 0
+	game.difficulty = "NORMAL"
+	init_session(1)
+
+	game.kills_goal = nil -- endless: it ends when you do
+	game.diff_mul = 1
+	game.weapon_cap = 6
+	game.spawn_interval = 1.8
+	game.max_concurrent = 6
+	game.health_mul, game.damage_mul = HEALTH_SCALE_BASE, DAMAGE_SCALE_BASE
+	game.pool = { "ALIEN", "ZOMBIE" }
+
+	game.active = true
+	audio.switch_music("music/crimsonquest", 0, 1)
+end
+
+-- difficulty/pool ramp, recomputed from elapsed time every frame
+local function update_survival_ramp(game)
+	local t = game.time
+	game.spawn_interval = math.max(0.3, 1.8 - t * 0.02)
+	game.max_concurrent = math.min(60, 6 + math.floor(t * 0.4))
+	game.weapon_cap = math.min(30, 6 + math.floor(t / 25))
+	game.health_mul = HEALTH_SCALE_BASE * (1 + t / 90)
+	game.damage_mul = DAMAGE_SCALE_BASE * (1 + t / 180)
+	local pool = {}
+	for _, wave in ipairs(SURVIVAL_WAVES) do
+		if t >= wave.t then
+			for _, ctype in ipairs(wave) do pool[#pool + 1] = ctype end
+		end
+	end
+	game.pool = pool
 end
 
 --- Quit the running quest (escape key) and return to the main menu.
@@ -309,6 +367,7 @@ local function update_player(game, dt)
 			p.muzzle = 0.05
 			audio.play_sound(p.weapon.snd_fire, 1, 0, 1 + (love.math.random() - 0.5) / 6)
 			local w = p.weapon
+			game.shots = game.shots + 1
 			-- flame weapons are short-ranged sprays; everything else uses
 			-- the XML range (rockets detonate when they run out)
 			local range = w.projectile_range * RANGE_SCALE
@@ -416,6 +475,7 @@ local function update_bullets(game, dt)
 					local ddx, ddy = c.x - b.x, c.y - b.y
 					if ddx * ddx + ddy * ddy < r * r then
 						dead = true
+						game.hits = game.hits + 1
 						if b.explosive then
 							explode(game, b.x, b.y, b.damage)
 						else
@@ -528,14 +588,18 @@ function game.update(dt)
 
 	if game.outcome then
 		game.end_timer = game.end_timer - dt
-		-- let gore finish, then hand control back to the menus
+		-- let the gore finish, then hand over to the original end screens
 		update_creatures(game, dt)
-		if game.end_timer <= 0 then
-			game.active = false
-			local timeline = require("src.engine.timeline")
-			timeline.begin("MainMenu")
+		particles.update(dt)
+		if game.end_timer <= 0 and not game.end_screen_pushed then
+			game.end_screen_pushed = true
+			game.open_end_screen()
 		end
 		return
+	end
+
+	if game.mode == "survival" then
+		update_survival_ramp(game)
 	end
 
 	update_player(game, dt)
@@ -544,10 +608,11 @@ function game.update(dt)
 	update_drops(game, dt)
 	particles.update(dt)
 
-	-- spawner
+	-- spawner (quest mode stops spawning once enough kills are in flight)
 	game.spawn_timer = game.spawn_timer - dt
-	if game.spawn_timer <= 0 and #game.creatures < game.max_concurrent
-		and game.kills + #game.creatures < game.kills_goal + game.max_concurrent then
+	local under_goal = not game.kills_goal
+		or game.kills + #game.creatures < game.kills_goal + game.max_concurrent
+	if game.spawn_timer <= 0 and #game.creatures < game.max_concurrent and under_goal then
 		game.spawn_timer = game.spawn_interval
 		spawn_creature(game)
 	end
@@ -568,15 +633,45 @@ function game.update(dt)
 		game.player.hp = math.min(game.player.max_hp, game.player.hp + mods.regen * dt)
 	end
 
-	-- win/lose
-	if game.kills >= game.kills_goal then
+	-- win/lose (survival has no win condition)
+	if game.kills_goal and game.kills >= game.kills_goal then
 		game.outcome = "won"
-		game.end_timer = 2.5
+		game.end_timer = 1.2
 		print("[game] quest completed!")
 	elseif game.player.hp <= 0 then
 		game.outcome = "lost"
-		game.end_timer = 3.0
+		game.end_timer = 1.6
 		print("[game] you died")
+	end
+end
+
+--- Push the appropriate original end screen for the finished round.
+function game.open_end_screen()
+	local screens = require("src.engine.screens")
+	local comps = require("src.engine.comps")
+	if game.mode == "survival" then
+		local s = screens.push("SurvivalOver")
+		-- fill the stats the layout displays (C++ did this originally)
+		local function put(name, text)
+			if s.compmap[name] then
+				comps.set(s.compmap[name], "textbox.text", { tostring(text) })
+			end
+		end
+		put("Score", string.format("%d", game.score))
+		put("Time", string.format("%d:%02d", math.floor(game.time / 60),
+			math.floor(game.time % 60)))
+		put("Kills", string.format("%d", game.kills))
+		put("Accuracy", string.format("%d%%",
+			game.shots > 0 and math.floor(game.hits / game.shots * 100 + 0.5) or 0))
+		put("WeaponName", game.player.weapon.name or game.player.weapon.id)
+		if s.compmap.NewLocalHighscore then
+			comps.set(s.compmap.NewLocalHighscore, "visible",
+				{ game.new_highscore == true })
+		end
+	elseif game.outcome == "won" then
+		screens.push("LevelCompleted")
+	else
+		screens.push("LevelFailed")
 	end
 end
 
@@ -706,10 +801,18 @@ function game.draw()
 	love.graphics.printf(string.format("%s  %d/%d%s", p.weapon.name or p.weapon.id,
 		p.ammo, game.clip_size(),
 		p.reloading > 0 and " (reloading)" or ""), 10, 30, 400, "left")
-	love.graphics.printf(string.format("KILLS %d/%d   SCORE %d   LEVEL %d",
-		game.kills, game.kills_goal, game.score, game.level), 10, 50, 600, "left")
-	love.graphics.printf(string.format("QUEST %d.%d (%s)", game.chapter, game.quest, game.difficulty),
-		SCREEN_W - 210, 10, 200, "right")
+	if game.mode == "survival" then
+		love.graphics.printf(string.format("KILLS %d   SCORE %d   LEVEL %d",
+			game.kills, game.score, game.level), 10, 50, 600, "left")
+		love.graphics.printf(string.format("SURVIVAL  %d:%02d",
+			math.floor(game.time / 60), math.floor(game.time % 60)),
+			SCREEN_W - 210, 10, 200, "right")
+	else
+		love.graphics.printf(string.format("KILLS %d/%d   SCORE %d   LEVEL %d",
+			game.kills, game.kills_goal, game.score, game.level), 10, 50, 600, "left")
+		love.graphics.printf(string.format("QUEST %d.%d (%s)", game.chapter, game.quest, game.difficulty),
+			SCREEN_W - 210, 10, 200, "right")
+	end
 	if game.outcome then
 		love.graphics.printf(game.outcome == "won" and "QUEST COMPLETED!" or "YOU DIED",
 			0, SCREEN_H / 2 - 40, SCREEN_W, "center")
@@ -757,8 +860,60 @@ function game.on_ui_click(screen_name, comp_name)
 			screens.pop("PickAPerk")
 			return true
 		end
+	elseif screen_name == "PlayMenuSurvival" then
+		if comp_name == "Play_SURVIVAL" then
+			game.start_survival()
+			require("src.engine.timeline").begin("Game")
+			return true
+		elseif comp_name:match("^Play_") then
+			print(("[game] mode %s not implemented yet"):format(comp_name))
+			return true
+		end
+	elseif screen_name == "LevelCompleted" then
+		if comp_name == "PlayNext" then
+			local chapter, quest = game.chapter, game.quest + 1
+			if quest > 10 then chapter, quest = chapter + 1, 1 end
+			if chapter > #CHAPTER_CREATURES then
+				game.to_main_menu()
+			else
+				game.start_quest(chapter, quest, game.difficulty)
+				require("src.engine.timeline").begin("Game")
+			end
+			return true
+		elseif comp_name == "Retry" then
+			game.start_quest(game.chapter, game.quest, game.difficulty)
+			require("src.engine.timeline").begin("Game")
+			return true
+		elseif comp_name == "PlayMenu" or comp_name == "PlayCustomQuestsMenu" then
+			game.to_main_menu()
+			return true
+		end
+	elseif screen_name == "LevelFailed" then
+		if comp_name == "PlayAgain" then
+			game.start_quest(game.chapter, game.quest, game.difficulty)
+			require("src.engine.timeline").begin("Game")
+			return true
+		elseif comp_name == "PlayMenu" then
+			game.to_main_menu()
+			return true
+		end
+	elseif screen_name == "SurvivalOver" then
+		if comp_name == "PlayAgain" then
+			game.start_survival()
+			require("src.engine.timeline").begin("Game")
+			return true
+		elseif comp_name == "PlayMenu" or comp_name == "HighScores" then
+			game.to_main_menu()
+			return true
+		end
 	end
 	return false
+end
+
+--- Leave gameplay entirely and return to the menu timeline.
+function game.to_main_menu()
+	game.active = false
+	require("src.engine.timeline").begin("MainMenu")
 end
 
 function game.selected_chapter() return selected_chapter end

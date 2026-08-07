@@ -53,9 +53,9 @@ function harness.capture()
 
 	local game = require("src.game.play")
 	if game.active then
-		print(string.format("  game t=%.1f hp=%d kills=%d/%d creatures=%d bullets=%d",
-			game.time, game.player.hp, game.kills, game.kills_goal,
-			#game.creatures, #game.bullets))
+		print(string.format("  game mode=%s t=%.1f hp=%d kills=%d/%s creatures=%d bullets=%d",
+			game.mode or "?", game.time, game.player.hp, game.kills,
+			tostring(game.kills_goal or "inf"), #game.creatures, #game.bullets))
 	end
 
 	local top = screens.top()

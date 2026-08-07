@@ -3,6 +3,7 @@
 -- next node in file order; BeginTimelineEvent(id) jumps; JUMP nodes loop.
 
 local xml = require("src.xml")
+local paths = require("src.engine.paths")
 local screens = require("src.engine.screens")
 
 local timeline = {}
@@ -12,7 +13,7 @@ timeline.order = {}
 timeline.current = nil -- node id
 
 function timeline.load()
-	local data = love.filesystem.read("assets/timeline.xml")
+	local data = love.filesystem.read(paths.ASSETS .. "/timeline.xml")
 	local root = xml.parse(data)
 	local arr = xml.array(root, "timeline")
 	for _, node in ipairs(arr.children) do

@@ -18,7 +18,7 @@ screens.stack = {} -- bottom .. top
 screens.current = nil -- screen whose script is executing (callback context)
 screens.loading = nil -- screen currently running its layout script
 
-local SCRIPT_ROOT = "assets/"
+local SCRIPT_ROOT = require("src.engine.paths").ASSETS .. "/"
 
 -- ------------------------------------------------------------- registration
 

@@ -6,9 +6,11 @@
 
 local assets = {}
 
-local ROOT_MAIN = "assets"
-local ROOT_SFX = "assets-sfx"
-local ROOT_MUSIC = "assets-music"
+local paths = require("src.engine.paths")
+
+local ROOT_MAIN = paths.ASSETS
+local ROOT_SFX = paths.SFX
+local ROOT_MUSIC = paths.MUSIC
 
 local image_cache = {}
 local sound_cache = {}

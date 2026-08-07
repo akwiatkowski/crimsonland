@@ -14,15 +14,15 @@ the game logic is plaintext Lua, so we reimplement the engine's Lua API.
 - macOS, Apple Silicon (M4 Pro). Tool versions via `mise` — run project commands
   as `mise exec -- <cmd>`, never bare cargo/trunk/etc.
 - `innoextract` installed via Homebrew (used once for the GOG installer).
-- Original data: `Crimsonland.2014.rar` → `setup_crimsonland_2.2.0.4.exe` →
-  `extracted/app/` (kept locally, gitignored).
+- Original data lives under `vendor/` (gitignored, reproducible via
+  `make extract`): rar, installer, `extracted/`, `assets*/`.
 
 ## Key facts discovered (do not rediscover)
 
 ### Binaries
-- `extracted/app/Crimsonland.exe` — 2.9 MB PE32 (x86) launcher/engine shell
-- `extracted/app/prog.dll` — 1.3 MB PE32, the actual engine + embedded **Lua 5.1**
-- `extracted/app/prog.xml` — app config: `reference_resolution="960x640"`,
+- `vendor/extracted/app/Crimsonland.exe` — 2.9 MB PE32 (x86) launcher/engine shell
+- `vendor/extracted/app/prog.dll` — 1.3 MB PE32, the actual engine + embedded **Lua 5.1**
+- `vendor/extracted/app/prog.xml` — app config: `reference_resolution="960x640"`,
   `fps_limit="152"`, features `ACHIEVEMENTS,LEADERBOARDS`,
   control interfaces GAMEPAD,MOUSE,TOUCH,KEYBOARD
 
@@ -33,11 +33,11 @@ directory at dir_offset: u16 count, entries of `name\0 + u32 offset + u32 size +
 Files inside are verbatim PNG / Ogg / XML / Lua — no per-file compression.
 
 ### Extracted assets
-- `assets/` — 4157 files from data.pak: 123 plaintext **Lua 5.1** scripts
+- `vendor/assets/` — 4157 files from data.pak: 123 plaintext **Lua 5.1** scripts
   (~11,310 lines), XML configs (`creatures/`, `weapons/`, `perks/`, `chapters.xml`,
   `game-modes/`, `fxs/`, `ui/` with most Lua), PNG art, shaders
-- `assets-1080p/` — 3119 hi-res variants
-- `assets-music/` — 7 OGG 44.1kHz, `assets-sfx/` — 104 OGG
+— `vendor/assets-1080p/` — 3119 hi-res variants
+- `vendor/assets-music/` — 8 OGG 44.1kHz, `vendor/assets-sfx/` — 105 OGG
 - Scripts use custom include: `LuaInclude("ui/common-ui-funcs.lua")`
 
 ### Engine Lua API (61 NX_* functions, from `strings prog.dll`)
@@ -61,7 +61,7 @@ NX_SetCursor NX_GetInterface NX_GetTime NX_FileExists NX_Popup NX_CallExtension`
   (grep scripts for all global function calls and cross-reference with prog.dll
   strings) — creatures, weapons, player, UI framework, save DB (`DM_SaveDatabase`),
   achievements/leaderboards hooks
-- Script bootstrap order / entry point (look at `assets/loader/`, `events.lua`
+- Script bootstrap order / entry point (look at `vendor/assets/loader/`, `events.lua`
   references in prog.dll strings, `index.xml`, `timeline.xml`)
 
 ## Port plan
@@ -74,8 +74,8 @@ NX_SetCursor NX_GetInterface NX_GetTime NX_FileExists NX_Popup NX_CallExtension`
 
 ## Conventions
 
-- Large binaries stay out of git (see `.gitignore`): rar, installer, `extracted/`,
-  `assets*/` — everything reproducible via README's rebuild steps.
+- Large binaries stay out of git: everything under `vendor/` is ignored and
+  reproducible via `make extract` (see README).
 - Conventional commits; minimal diffs; keep this file and README status sections
   current when facts change.
 - Do NOT redistribute copyrighted assets; treat this as a personal interop port.

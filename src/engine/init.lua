@@ -10,6 +10,7 @@ local audio = require("src.engine.audio")
 local comps = require("src.engine.comps")
 local font = require("src.engine.font")
 local nx = require("src.engine.nx")
+local paths = require("src.engine.paths")
 local platform = require("src.engine.platform")
 local screens = require("src.engine.screens")
 local timeline = require("src.engine.timeline")
@@ -57,7 +58,7 @@ end
 
 API.LuaInclude = function(path)
 	local env = getfenv(2)
-	local chunk, err = loadfile("assets/" .. path)
+	local chunk, err = loadfile(paths.ASSETS .. "/" .. path)
 	if not chunk then
 		print(("[api] LuaInclude failed: %s: %s"):format(path, err))
 		return
@@ -490,7 +491,7 @@ API.NX_BLEND_ADDITIVE = "ADDITIVE"
 local function load_templates()
 	local env = engine.new_script_env(nil)
 	env.__templates_mode = true
-	local chunk = assert(loadfile("assets/ui/templates.lua"))
+	local chunk = assert(loadfile(paths.ASSETS .. "/ui/templates.lua"))
 	setfenv(chunk, env)
 	local ok, err = pcall(chunk)
 	if not ok then print("[boot] templates.lua error: " .. tostring(err)) end
@@ -498,7 +499,7 @@ end
 
 local function load_autoexec()
 	local env = engine.new_script_env(nil)
-	local chunk = assert(loadfile("assets/ui/autoexec.lua"))
+	local chunk = assert(loadfile(paths.ASSETS .. "/ui/autoexec.lua"))
 	setfenv(chunk, env)
 	local ok, err = pcall(chunk)
 	if not ok then print("[boot] autoexec.lua error: " .. tostring(err)) end

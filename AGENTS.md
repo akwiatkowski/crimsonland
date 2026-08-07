@@ -1,0 +1,81 @@
+# AGENTS.md — Crimsonland macOS port
+
+<!-- Context for coding agents. Read this first when resuming work. -->
+
+## Goal
+
+Native macOS (Apple Silicon) port of Crimsonland 2014 (GOG build 2.2.0.4, game
+version 1.2.3.0 per `prog.xml`) by running the **original Lua scripts + assets**
+on a **reimplemented engine runtime**. Not a decompilation of x86 machine code —
+the game logic is plaintext Lua, so we reimplement the engine's Lua API.
+
+## Environment
+
+- macOS, Apple Silicon (M4 Pro). Tool versions via `mise` — run project commands
+  as `mise exec -- <cmd>`, never bare cargo/trunk/etc.
+- `innoextract` installed via Homebrew (used once for the GOG installer).
+- Original data: `Crimsonland.2014.rar` → `setup_crimsonland_2.2.0.4.exe` →
+  `extracted/app/` (kept locally, gitignored).
+
+## Key facts discovered (do not rediscover)
+
+### Binaries
+- `extracted/app/Crimsonland.exe` — 2.9 MB PE32 (x86) launcher/engine shell
+- `extracted/app/prog.dll` — 1.3 MB PE32, the actual engine + embedded **Lua 5.1**
+- `extracted/app/prog.xml` — app config: `reference_resolution="960x640"`,
+  `fps_limit="152"`, features `ACHIEVEMENTS,LEADERBOARDS`,
+  control interfaces GAMEPAD,MOUSE,TOUCH,KEYBOARD
+
+### PAK V11 archive format (spec in `tools/extract_pak.py` docstring)
+`"PAK\0V11\0"` + u32 dir_offset + u32 total_size, then raw concatenated file data;
+directory at dir_offset: u16 count, entries of `name\0 + u32 offset + u32 size +
+8 bytes extra` (constant `ff26e25020000000` everywhere — likely hash + flags).
+Files inside are verbatim PNG / Ogg / XML / Lua — no per-file compression.
+
+### Extracted assets
+- `assets/` — 4157 files from data.pak: 123 plaintext **Lua 5.1** scripts
+  (~11,310 lines), XML configs (`creatures/`, `weapons/`, `perks/`, `chapters.xml`,
+  `game-modes/`, `fxs/`, `ui/` with most Lua), PNG art, shaders
+- `assets-1080p/` — 3119 hi-res variants
+- `assets-music/` — 7 OGG 44.1kHz, `assets-sfx/` — 104 OGG
+- Scripts use custom include: `LuaInclude("ui/common-ui-funcs.lua")`
+
+### Engine Lua API (61 NX_* functions, from `strings prog.dll`)
+Rendering: `NX_LoadBitmap NX_GetBitmap NX_DrawBitmap NX_DrawBitmapS NX_DrawBitmapRS
+NX_DrawBitmapMirroredRS NX_DrawBitmapAligned NX_DrawSubBitmap NX_CreateBitmap
+NX_RefreshBitmap NX_ReleaseBitmap NX_IsBitmapReady NX_GetBitmapWidth/Height
+NX_GetNumBitmapFrames NX_SetBitmapFrame NX_SetBitmapCacheMode NX_ClearScreen
+NX_DrawLine NX_DrawRect NX_SetBlend NX_BLEND_ADDITIVE NX_SetAlpha NX_SetColor
+NX_SetPixelFilter NX_Push/PopScissorRectangle NX_Push/PopTransform
+NX_PushTransformRotation/Scale/Translation`
+Text: `NX_GetFont NX_DrawText NX_GetTextWidth/Height NX_GetFontHeight
+NX_SetTextAlign NX_SetTextboxWidth NX_SetTextTransform`
+Audio: `NX_LoadSound NX_GetSound NX_PlaySound NX_ReleaseSound NX_SetSoundParm
+NX_SetChannelFrequency/Looping/Paused NX_SlideChannelVolume NX_SlideMusicVolume
+NX_StopChannel NX_AllowMusic`
+Input/misc: `NX_GetKeyState NX_GetKeyStateFloat NX_SetKeyState NX_SetKeyStateFloat
+NX_SetCursor NX_GetInterface NX_GetTime NX_FileExists NX_Popup NX_CallExtension`
+
+### NOT yet mapped (next session's job)
+- The API surface **beyond NX_***: game-object functions the scripts call
+  (grep scripts for all global function calls and cross-reference with prog.dll
+  strings) — creatures, weapons, player, UI framework, save DB (`DM_SaveDatabase`),
+  achievements/leaderboards hooks
+- Script bootstrap order / entry point (look at `assets/loader/`, `events.lua`
+  references in prog.dll strings, `index.xml`, `timeline.xml`)
+
+## Port plan
+
+1. Inventory the full Lua API (NX_* + game objects) the scripts actually use.
+2. Implement a runtime on **LÖVE 11.x** (LuaJIT = Lua 5.1 compatible) — love2d's
+   image/audio/draw API maps closely onto NX_*. Add `LuaInclude` shim.
+3. Milestones: main menu renders → menu navigation → gameplay loop → polish
+   (achievements, leaderboards are stubbed/optional).
+
+## Conventions
+
+- Large binaries stay out of git (see `.gitignore`): rar, installer, `extracted/`,
+  `assets*/` — everything reproducible via README's rebuild steps.
+- Conventional commits; minimal diffs; keep this file and README status sections
+  current when facts change.
+- Do NOT redistribute copyrighted assets; treat this as a personal interop port.

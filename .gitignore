@@ -1,0 +1,11 @@
+# Copyrighted source material / extracted data (reproducible, see README)
+Crimsonland.2014.rar
+setup_crimsonland_*.exe
+extracted/
+assets/
+assets-1080p/
+assets-music/
+assets-sfx/
+
+# OS / editor noise
+.DS_Store

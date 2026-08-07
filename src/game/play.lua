@@ -58,8 +58,21 @@ local FLAME = { FLAMETHROWER = true, BLOW_TORCH = true, HR_FLAMER = true }
 
 local DROP_WEAPON_CHANCE = 0.08
 local DROP_HEALTH_CHANCE = 0.06
+local DROP_POWERUP_CHANCE = 0.05
 local PICKUP_RADIUS = 26
 local HEALTH_PACK_HEAL = 25
+
+-- timed/instant powerups (art ships in powerups/); durations in seconds
+local POWERUPS = {
+	{ id = "NUKE", icon = "powerups/powerup-nuke.png", dur = 0, snd = "sfx/explosion_nuke" },
+	{ id = "FREEZE", icon = "powerups/powerup-freeze.png", dur = 6, snd = "sfx/freeze" },
+	{ id = "SHIELD", icon = "powerups/powerup-shield.png", dur = 8, snd = "sfx/unlocked" },
+	{ id = "DOUBLE_POINTS", icon = "powerups/powerup-double-points.png", dur = 12, snd = "sfx/unlocked" },
+	{ id = "SPEED", icon = "powerups/powerup-move-speed.png", dur = 8, snd = "sfx/unlocked" },
+	{ id = "FIRE_BULLETS", icon = "powerups/powerup-fire-bullets.png", dur = 10, snd = "sfx/unlocked" },
+}
+local POWERUP_BY_ID = {}
+for _, pu in ipairs(POWERUPS) do POWERUP_BY_ID[pu.id] = pu end
 
 -- ------------------------------------------------------------ terrain bake
 
@@ -138,6 +151,7 @@ local function init_session(terrain_chapter)
 	game.creatures = {}
 	game.bullets = {}
 	game.drops = {}
+	game.effects = {} -- active timed powerups: id -> seconds left
 	game.mods = perks.fresh_mods()
 	game.owned_perks = {}
 	game.perk_choices = nil
@@ -335,6 +349,7 @@ local function update_player(game, dt)
 	if p.moving then
 		local len = math.sqrt(dx * dx + dy * dy)
 		local speed = p.speed * game.mods.speed
+			* (game.effects.SPEED and 1.5 or 1)
 		p.x = math.max(16, math.min(WORLD - 16, p.x + dx / len * speed * dt))
 		p.y = math.max(16, math.min(WORLD - 16, p.y + dy / len * speed * dt))
 		p.anim_t = p.anim_t + dt
@@ -385,16 +400,20 @@ local function update_player(game, dt)
 					dy = math.sin(a),
 					speed = w.projectile_speed * BULLET_SPEED_SCALE,
 					dist_left = range * (FLAME[w.id] and (0.6 + love.math.random() * 0.4) or 1),
-					damage = w.damage_effective * game.mods.dmg,
+					damage = w.damage_effective * game.mods.dmg
+						* (game.effects.FIRE_BULLETS and 2 or 1),
 					explosive = EXPLOSIVE[w.id] or nil,
 					flame = FLAME[w.id] or nil,
+					fire = game.effects.FIRE_BULLETS and true or nil,
 				}
 			end
 		end
 	end
 end
 
--- roll the powerup table where a creature died
+local damage_creature -- forward declaration: nuke pickups kill via drops code
+
+-- roll the drop table where a creature died
 local function try_drop(game, x, y)
 	local roll = love.math.random()
 	if roll < DROP_WEAPON_CHANCE then
@@ -410,11 +429,31 @@ local function try_drop(game, x, y)
 		end
 	elseif roll < DROP_WEAPON_CHANCE + DROP_HEALTH_CHANCE then
 		game.drops[#game.drops + 1] = { kind = "health", x = x, y = y, t = 0 }
+	elseif roll < DROP_WEAPON_CHANCE + DROP_HEALTH_CHANCE + DROP_POWERUP_CHANCE then
+		local pu = POWERUPS[love.math.random(#POWERUPS)]
+		game.drops[#game.drops + 1] = { kind = "powerup", powerup = pu, x = x, y = y, t = 0 }
+	end
+end
+
+--- Activate a picked-up powerup: instant effect or timed buff.
+local function activate_powerup(game, pu)
+	audio.play_sound(pu.snd)
+	print(("[game] powerup: %s"):format(pu.id))
+	if pu.id == "NUKE" then
+		-- wipe everything alive; each death pays out normally
+		for _, c in ipairs(game.creatures) do
+			if not c.dying then
+				particles.explosion(c.x, c.y, 60)
+				damage_creature(game, c, 1e6)
+			end
+		end
+	else
+		game.effects[pu.id] = pu.dur
 	end
 end
 
 --- Apply damage to a creature; handles the kill (gore, score, xp, drops).
-local function damage_creature(game, c, dmg)
+function damage_creature(game, c, dmg)
 	if c.dying then return end
 	c.hp = c.hp - dmg
 	if c.hp <= 0 then
@@ -424,8 +463,9 @@ local function damage_creature(game, c, dmg)
 		c.rot = math.atan2(game.player.y - c.y, game.player.x - c.x) + math.pi / 2
 		particles.death_burst(c.x, c.y, c.variant.scale)
 		game.kills = game.kills + 1
-		game.score = game.score + c.variant.xp
-		game.xp = game.xp + c.variant.xp * game.mods.xp
+		local points_mul = game.effects.DOUBLE_POINTS and 2 or 1
+		game.score = game.score + c.variant.xp * points_mul
+		game.xp = game.xp + c.variant.xp * game.mods.xp * points_mul
 		if game.mods.kill_heal > 0 then
 			game.player.hp = math.min(game.player.max_hp,
 				game.player.hp + game.mods.kill_heal)
@@ -509,6 +549,8 @@ local function update_drops(game, dt)
 				p.cooldown = 0
 				p.ammo = game.clip_size()
 				audio.play_sound("sfx/unlock_weapon")
+			elseif d.kind == "powerup" then
+				activate_powerup(game, d.powerup)
 			else
 				p.hp = math.min(p.max_hp,
 					p.hp + HEALTH_PACK_HEAL * game.mods.heal_mul)
@@ -545,6 +587,9 @@ local function update_creatures(game, dt)
 				end
 				table.remove(game.creatures, i)
 			end
+		elseif game.effects.FREEZE then
+			-- frozen solid: no movement, attacks or animation
+			c.attack_cd = math.max(c.attack_cd, 0.5)
 		else
 			c.anim_t = c.anim_t + dt
 			c.attack_cd = math.max(0, c.attack_cd - dt)
@@ -559,7 +604,7 @@ local function update_creatures(game, dt)
 			-- contact damage (perks: Thick Skinned, Tough Reloader, Radioactive)
 			local touch = 16 * c.variant.scale + 14
 			if dist < touch then
-				if c.attack_cd <= 0 then
+				if c.attack_cd <= 0 and not game.effects.SHIELD then
 					c.attack_cd = 0.8
 					local taken = game.mods.taken
 					if p.reloading > 0 then taken = taken * game.mods.reload_guard end
@@ -603,6 +648,12 @@ function game.update(dt)
 
 	if game.mode == "survival" then
 		update_survival_ramp(game)
+	end
+
+	-- timed powerup effects tick down
+	for id, left in pairs(game.effects) do
+		left = left - dt
+		game.effects[id] = (left > 0) and left or nil
 	end
 
 	update_player(game, dt)
@@ -726,6 +777,7 @@ function game.draw()
 				base_img:getWidth() / 2, base_img:getHeight() / 2)
 		end
 		local icon = assets.image(d.kind == "weapon" and d.weapon.icon
+			or d.kind == "powerup" and d.powerup.icon
 			or "powerups/powerup-medikit.png")
 		if icon then
 			love.graphics.draw(icon, d.x, d.y - 4 + bob, 0, 0.5, 0.5,
@@ -733,11 +785,16 @@ function game.draw()
 		end
 	end
 
-	-- creatures (shadow under, then body)
+	-- creatures (shadow under, then body; frozen ones tint ice-blue)
+	local frozen = game.effects.FREEZE
 	for _, c in ipairs(game.creatures) do
 		local def = c.def
 		local v = c.variant
-		love.graphics.setColor(v.r, v.g, v.b, 1)
+		if frozen and not c.dying then
+			love.graphics.setColor(v.r * 0.5, v.g * 0.7, math.min(1, v.b + 0.5), 1)
+		else
+			love.graphics.setColor(v.r, v.g, v.b, 1)
+		end
 		if c.dying then
 			local seq = def and def.die and bms.load(def.die)
 			if seq then
@@ -787,12 +844,13 @@ function game.draw()
 		end
 	end
 
-	-- bullets (flame projectiles draw as fading fireballs)
+	-- bullets (flame projectiles and fire-bullet rounds draw as fireballs)
 	for _, b in ipairs(game.bullets) do
-		if b.flame then
+		if b.flame or b.fire then
 			love.graphics.setBlendMode("add")
 			love.graphics.setColor(1, 0.55, 0.15, 0.8)
-			love.graphics.circle("fill", b.x, b.y, 5 + love.math.random() * 3)
+			love.graphics.circle("fill", b.x, b.y,
+				(b.flame and 5 or 3) + love.math.random() * 2)
 			love.graphics.setBlendMode("alpha")
 		else
 			love.graphics.setColor(1, 1, 0.6, 1)
@@ -822,6 +880,16 @@ function game.draw()
 		love.graphics.printf(string.format("QUEST %d.%d (%s)", game.chapter, game.quest, game.difficulty),
 			SCREEN_W - 210, 10, 200, "right")
 	end
+	-- active powerup timers
+	local ey = 70
+	for id, left in pairs(game.effects) do
+		love.graphics.setColor(0.6, 1, 0.6, 1)
+		love.graphics.printf(string.format("%s %.0fs", id, math.ceil(left)),
+			10, ey, 300, "left")
+		ey = ey + 16
+	end
+	love.graphics.setColor(1, 1, 1, 1)
+
 	if game.outcome then
 		love.graphics.printf(game.outcome == "won" and "QUEST COMPLETED!" or "YOU DIED",
 			0, SCREEN_H / 2 - 40, SCREEN_W, "center")

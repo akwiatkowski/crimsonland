@@ -47,7 +47,7 @@ brew install innoextract
 # put Crimsonland.2014.rar in vendor/
 make extract   # unpacks rar -> GOG installer -> paks -> vendor/assets*
 make run       # launches with LÖVE (expects ~/Applications/love.app)
-make test      # scripted autotest: menus -> quest 1.1 -> abort, ASCII captures
+make test      # scripted autotest (SCENARIO=quest-smoke): ASCII captures to terminal
 ```
 
 In-game controls: WASD/arrows move, mouse aims, LMB fires, R reloads,
@@ -57,9 +57,10 @@ Escape aborts the quest back to the menu.
 
 | Path                    | Contents                                           |
 |-------------------------|----------------------------------------------------|
-| `main.lua`, `conf.lua`  | LÖVE entry point (+ headless ASCII debug harness)  |
+| `main.lua`, `conf.lua`  | LÖVE entry point (game only)                       |
 | `src/engine/`           | Reimplemented 10tons engine runtime (screens, comps, NX_* API) |
 | `src/game/`             | Gameplay reimplementation (quests, creatures, weapons) |
+| `src/test/`             | Autotest harness + scripted scenarios (loaded only with `--autotest`) |
 | `tools/`                | `extract_pak.py` — PAK V11 extractor               |
 | `vendor/`               | Original rar, installer, `extracted/`, `assets*/` (gitignored) |
 

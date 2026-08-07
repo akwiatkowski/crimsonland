@@ -88,6 +88,17 @@ NX_SetCursor NX_GetInterface NX_GetTime NX_FileExists NX_Popup NX_CallExtension`
 - Quest kill-count/spawn tables are approximations — original quest defs were
   compiled into prog.dll; only `custom-quests/` ships as XML
 
+## Test harness (src/test/)
+
+- Loaded ONLY via `love . --autotest[=scenario]` (`make test SCENARIO=...`);
+  `make run` never touches test code — main.lua's arg check is the sole gate
+- `harness.lua` drives the game like a player (synthesized screens.mousepressed/
+  keypressed, read-only state captures) — do not mutate game internals from it
+- `scenarios/*.lua` are pure data: timed `{t, click=|key=}` steps + `captures`
+  time list. New test = new scenario file, no harness/game edits
+- Output: screen stack, game state line, clickable rects, ASCII canvas render —
+  all teed to /tmp/crimsonland_port.log
+
 ## Conventions
 
 - Large binaries stay out of git: everything under `vendor/` is ignored and

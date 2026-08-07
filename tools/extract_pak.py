@@ -6,7 +6,7 @@ Format (little-endian):
     0x08  u32       directory offset (from start of file)
     0x0C  u32       total file size
     ...   raw file data, concatenated
-    dir   u16       entry count
+    dir   u32       entry count
           per entry: NUL-terminated path (forward slashes),
                      u32 data offset, u32 data size, 8 bytes extra
                      (observed constant ff26e25020000000 - likely hash+flags)
@@ -26,8 +26,8 @@ def extract(pak_path: str, out_dir: str) -> None:
         sys.exit(f"{pak_path}: not a PAK V11 archive")
 
     dir_start = struct.unpack_from("<I", data, 8)[0]
-    count = struct.unpack_from("<H", data, dir_start)[0]
-    pos = dir_start + 2
+    count = struct.unpack_from("<I", data, dir_start)[0]
+    pos = dir_start + 4
 
     extracted = 0
     for _ in range(count):

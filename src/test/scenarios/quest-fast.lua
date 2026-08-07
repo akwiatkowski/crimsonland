@@ -6,6 +6,7 @@ return {
 	{ t = 3.4, click = "Play_Quests" },
 	{ t = 4.6, click = "Chapter_1" },
 	{ t = 5.8, click = "Quest_1" },
-	{ t = 11.0, key = "escape" },
-	captures = { 7.0, 10.0 },
+	{ t = 11.0, key = "escape" }, -- opens the pause screen
+	{ t = 12.0, click = "QuitToMenu" },
+	captures = { 7.0, 11.5, 13.0 },
 }

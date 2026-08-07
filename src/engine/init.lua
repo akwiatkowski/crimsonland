@@ -526,7 +526,38 @@ local function register_internal_screens()
 			screen.props.covers_screen = true
 			screen.env.OnUpdate = function(dt) game.update(dt) end
 			screen.env.OnKeyDown = function(key)
-				if key == "ESCAPE" and game.active then game.abort() end
+				if key == "ESCAPE" and game.active then game.pause() end
+			end
+			screen.env.OnDraw = function() end
+		end,
+	}
+	-- In-game pause: no original screen ships (it was C++-side), so build a
+	-- minimal one from real comps — that way hit-testing, hover sounds and
+	-- click routing work exactly like every other screen.
+	screens.registry["GamePause"] = {
+		internal = function(screen)
+			local game = require("src.game.play")
+			local function button(name, text, y)
+				local c = comps.new("Button", name, screen)
+				c._order = #screen.comps + 1
+				table.insert(screen.comps, c)
+				screen.compmap[name] = c
+				comps.set(c, "inherit", { "WideButton" })
+				comps.set(c, "position", { 0.5, y })
+				comps.set(c, "align", { "CENTER" })
+				comps.set(c, "button.text", { text })
+			end
+			button("Resume", "Resume", 0.46)
+			button("QuitToMenu", "Quit to Menu", 0.58)
+			screen.env.OnKeyDown = function(key)
+				if key == "ESCAPE" then game.unpause() end
+			end
+			screen.env.OnClick = function(name)
+				if name == "Resume" then
+					game.unpause()
+				elseif name == "QuitToMenu" then
+					game.to_main_menu()
+				end
 			end
 			screen.env.OnDraw = function() end
 		end,
@@ -580,6 +611,11 @@ local function draw_internal(screen)
 	elseif screen.name == "GameCrimsonland" then
 		-- gameplay when a quest is active, menu backdrop otherwise
 		require("src.game.play").draw()
+	elseif screen.name == "GamePause" then
+		love.graphics.setColor(0, 0, 0, 0.55)
+		love.graphics.rectangle("fill", 0, 0, screens.WIDTH, screens.HEIGHT)
+		love.graphics.setColor(1, 1, 1, 1)
+		love.graphics.printf("PAUSED", 0, screens.HEIGHT * 0.3, screens.WIDTH, "center")
 	end
 end
 engine.draw_internal = draw_internal

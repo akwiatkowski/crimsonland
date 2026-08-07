@@ -199,9 +199,15 @@ function screens.update(dt)
 		local s = screens.stack[i]
 		local is_top = (i == #screens.stack)
 		if s.no_phase then
-			s.phase = 0
-			s.timer = s.timer + dt
-			screens.call(s, "OnUpdate", dt)
+			if s.leaving then
+				-- internal screens have no transition: remove immediately
+				screens.call(s, "OnLeave")
+				table.remove(screens.stack, i)
+			else
+				s.phase = 0
+				s.timer = s.timer + dt
+				screens.call(s, "OnUpdate", dt)
+			end
 		elseif s.leaving then
 			s.phase = s.phase - dt / math.max(0.001, s.props.leave_trans_duration)
 			-- leaving screens still animate: their OnUpdate reads the

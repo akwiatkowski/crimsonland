@@ -17,8 +17,9 @@ game.active = false
 local WORLD = 2048 -- world size in pixels (square)
 local SCREEN_W, SCREEN_H = 960, 640
 
--- unit conversions (original engine units -> pixels; tuned by feel)
-local SPEED_SCALE = 60 -- creature speed 2.7 -> 162 px/s
+-- unit conversions (original engine units -> pixels; tuned by feel —
+-- lowered ~25% after the first playtest read "too fast")
+local SPEED_SCALE = 45 -- creature speed 2.7 -> 122 px/s
 local BULLET_SPEED_SCALE = 16 -- projectile_speed 55 -> 880 px/s
 local RANGE_SCALE = 4 -- projectile_range 300 -> 1200 px
 
@@ -124,7 +125,7 @@ local function init_session(terrain_chapter)
 		angle = 0,
 		hp = 100,
 		max_hp = 100,
-		speed = 220,
+		speed = 180, -- px/s (was 220; playtest: too fast)
 		anim_t = 0,
 		moving = false,
 		weapon = data.weapons.PISTOL or data.weapon_order[1],
@@ -229,13 +230,15 @@ local function update_survival_ramp(game)
 	game.pool = pool
 end
 
---- Quit the running quest (escape key) and return to the main menu.
-function game.abort()
-	if not game.active then return end
-	game.active = false
-	print("[game] quest aborted")
-	local timeline = require("src.engine.timeline")
-	timeline.begin("MainMenu")
+--- Escape during gameplay: open the pause screen (gameplay pauses
+-- automatically while any screen overlays GameCrimsonland).
+function game.pause()
+	if not game.active or game.outcome then return end
+	require("src.engine.screens").push("GamePause")
+end
+
+function game.unpause()
+	require("src.engine.screens").pop("GamePause")
 end
 
 -- ------------------------------------------------------------ spawning

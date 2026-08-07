@@ -9,6 +9,7 @@ local assets = require("src.engine.assets")
 local audio = require("src.engine.audio")
 local comps = require("src.engine.comps")
 local font = require("src.engine.font")
+local mod = require("src.engine.mod")
 local nx = require("src.engine.nx")
 local paths = require("src.engine.paths")
 local platform = require("src.engine.platform")
@@ -522,11 +523,11 @@ local function register_internal_screens()
 	}
 	screens.registry["GameCrimsonland"] = {
 		internal = function(screen)
-			local game = require("src.game.play")
 			screen.props.covers_screen = true
-			screen.env.OnUpdate = function(dt) game.update(dt) end
+			screen.env.OnUpdate = function(dt) mod.game_call("update", dt) end
 			screen.env.OnKeyDown = function(key)
-				if key == "ESCAPE" and game.active then game.pause() end
+				-- the mod's pause() guards against inactive/ended sessions
+				if key == "ESCAPE" then mod.game_call("pause") end
 			end
 			screen.env.OnDraw = function() end
 		end,
@@ -536,7 +537,6 @@ local function register_internal_screens()
 	-- click routing work exactly like every other screen.
 	screens.registry["GamePause"] = {
 		internal = function(screen)
-			local game = require("src.game.play")
 			local function button(name, text, y)
 				local c = comps.new("Button", name, screen)
 				c._order = #screen.comps + 1
@@ -550,13 +550,13 @@ local function register_internal_screens()
 			button("Resume", "Resume", 0.46)
 			button("QuitToMenu", "Quit to Menu", 0.58)
 			screen.env.OnKeyDown = function(key)
-				if key == "ESCAPE" then game.unpause() end
+				if key == "ESCAPE" then mod.game_call("unpause") end
 			end
 			screen.env.OnClick = function(name)
 				if name == "Resume" then
-					game.unpause()
+					mod.game_call("unpause")
 				elseif name == "QuitToMenu" then
-					game.to_main_menu()
+					mod.game_call("to_main_menu")
 				end
 			end
 			screen.env.OnDraw = function() end
@@ -609,8 +609,8 @@ local function draw_internal(screen)
 				(screens.HEIGHT - img:getHeight()) / 2)
 		end
 	elseif screen.name == "GameCrimsonland" then
-		-- gameplay when a quest is active, menu backdrop otherwise
-		require("src.game.play").draw()
+		-- gameplay when a session is active, menu backdrop otherwise
+		mod.game_call("draw")
 	elseif screen.name == "GamePause" then
 		love.graphics.setColor(0, 0, 0, 0.55)
 		love.graphics.rectangle("fill", 0, 0, screens.WIDTH, screens.HEIGHT)
@@ -649,7 +649,8 @@ function engine.start()
 		canvas = love.graphics.newCanvas(screens.WIDTH, screens.HEIGHT)
 		compute_viewport()
 
-		require("src.game.save").load()
+		if mod.current == nil then mod.select("vanilla") end
+		if mod.current.save.load then mod.current.save.load() end
 		load_templates()
 		load_autoexec()
 		register_internal_screens()
@@ -660,7 +661,7 @@ function engine.start()
 	end
 
 	love.quit = function()
-		require("src.game.save").flush()
+		if mod.current and mod.current.save.flush then mod.current.save.flush() end
 		return false
 	end
 

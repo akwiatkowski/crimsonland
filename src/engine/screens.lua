@@ -322,8 +322,8 @@ function screens.mousepressed(x, y, button)
 				end
 				screens.call(top, "OnClick", hit.name)
 				-- clicks the script's OnClick ignores (Chapter_N, Quest_N —
-				-- handled in C++ originally) fall through to the game layer
-				require("src.game.play").on_ui_click(top.name, hit.name)
+				-- handled in C++ originally) fall through to the active mod
+				require("src.engine.mod").game_call("on_ui_click", top.name, hit.name)
 				return
 			end
 		end

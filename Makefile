@@ -18,8 +18,10 @@ STAMP    := $(VENDOR)/.extracted
 
 .PHONY: run test extract clean check-love
 
+MOD ?= vanilla
+
 run: check-love
-	$(LOVE) .
+	$(LOVE) . --mod=$(MOD)
 
 SCENARIO ?= quest-smoke
 

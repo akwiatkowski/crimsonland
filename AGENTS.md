@@ -73,6 +73,20 @@ NX_SetCursor NX_GetInterface NX_GetTime NX_FileExists NX_Popup NX_CallExtension`
    (first playable quest mode in `src/game/`) → polish (perks, powerups, FX,
    survival mode, persistence; achievements/leaderboards are stubbed/optional).
 
+## Mod architecture (engine = console, mod = cartridge)
+
+- The engine never requires game code directly: all coupling goes through
+  `src/engine/mod.lua` — a mod descriptor (`mods/<name>/init.lua`) provides
+  `game` hooks (update/draw/pause/unpause/to_main_menu/on_ui_click), `save`
+  (load/flush), and optional `paths` overrides for total conversions.
+- Selected with `--mod=<name>` (`make run MOD=<name>`), default `vanilla`.
+- `mods/vanilla/` is the clean-room Crimsonland; its implementation still
+  lives in `src/game/` (predates the architecture — physically moving it is
+  fine in a quiet window, only the descriptor's requires change).
+- ORDERING: `mod.select()` runs before `src.engine` loads, because engine
+  modules capture asset roots from `src.engine.paths` at require time and
+  path overrides mutate that table in place.
+
 ## Gameplay layer (src/game/)
 
 - `data.lua` — loads original XML datasets (weapons, creatures, variants,

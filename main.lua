@@ -28,7 +28,7 @@ engine.start()
 if autotest then
 
 -- ASCII-art capture of the reference canvas at fixed times after boot.
-local captures = { 2.0, 6.0, 9.0, 12.0, 15.0 }
+local captures = { 2.0, 6.0, 10.0, 14.0, 18.0, 22.0 }
 local capture_idx = 1
 local elapsed = 0
 
@@ -58,7 +58,7 @@ local actions = {
 	{ t = 4.0, fn = function() click_button("Play_Quests") end },
 	{ t = 5.5, fn = function() click_button("Chapter_1") end },
 	{ t = 7.0, fn = function() click_button("Quest_1") end },
-	{ t = 13.0, fn = function() screens_mod.keypressed("escape") end },
+	{ t = 21.0, fn = function() screens_mod.keypressed("escape") end },
 }
 local action_idx = 1
 

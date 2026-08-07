@@ -33,6 +33,19 @@ local CHAPTER_CREATURES = {
 
 local DIFFICULTY = { NORMAL = 1.0, HARDCORE = 1.5, GRIM = 2.0 }
 
+-- The XML variant stats are late-game values; the original scaled them per
+-- quest via defs compiled into prog.dll. Approximate the intended feel:
+-- chapter-1 basics die to 2-4 pistol shots (4.1 dmg vs ALIEN 68 hp raw) and
+-- a touch chips ~5 hp (raw damage is 12-35), both ramping with progress.
+local HEALTH_SCALE_BASE = 0.15
+local DAMAGE_SCALE_BASE = 0.4
+
+local function progression_muls(chapter, quest, diff_mul)
+	local ramp = 1 + 0.15 * (quest - 1) + 0.5 * (chapter - 1)
+	return HEALTH_SCALE_BASE * ramp * diff_mul,
+		DAMAGE_SCALE_BASE * ramp * diff_mul
+end
+
 -- ------------------------------------------------------------ terrain bake
 
 local function bake_terrain(chapter_id)
@@ -119,13 +132,14 @@ function game.start_quest(chapter, quest, difficulty)
 	game.score = 0
 	game.xp = 0
 	game.level = 1
-	game.xp_next = 150
+	game.xp_next = 500 -- variant xp worth is 50-450; first level ~4 kills
 	game.kills = 0
 	game.kills_goal = 15 + 10 * quest + 5 * (chapter - 1) * 10
 	game.spawn_timer = 0
 	game.spawn_interval = math.max(0.4, 2.2 - 0.15 * quest - 0.2 * (chapter - 1))
 	game.max_concurrent = math.min(40, 4 + 2 * quest + 3 * (chapter - 1))
 	game.diff_mul = diff_mul
+	game.health_mul, game.damage_mul = progression_muls(chapter, quest, diff_mul)
 	game.outcome = nil -- "won" | "lost"
 	game.end_timer = nil
 	game.time = 0
@@ -165,7 +179,7 @@ local function spawn_creature(game)
 		def = data.creatures[ctype],
 		x = x,
 		y = y,
-		hp = variant.health * game.diff_mul,
+		hp = variant.health * game.health_mul,
 		anim_t = love.math.random() * 2,
 		attack_cd = 0,
 	}
@@ -303,7 +317,7 @@ local function update_creatures(game, dt)
 			local touch = 16 * c.variant.scale + 14
 			if dist < touch and c.attack_cd <= 0 then
 				c.attack_cd = 0.8
-				p.hp = p.hp - c.variant.damage * game.diff_mul
+				p.hp = p.hp - c.variant.damage * game.damage_mul
 				local snd = c.def and c.def.sounds and c.def.sounds.snd_attack_01
 				if snd and snd ~= "!NONE" then audio.play_sound(snd) end
 			end
@@ -343,7 +357,7 @@ function game.update(dt)
 	if game.xp >= game.xp_next then
 		game.xp = game.xp - game.xp_next
 		game.level = game.level + 1
-		game.xp_next = math.floor(game.xp_next * 1.4)
+		game.xp_next = math.floor(game.xp_next * 1.5)
 		game.player.hp = math.min(game.player.max_hp, game.player.hp + 25)
 		print(("[game] level up! now level %d"):format(game.level))
 	end
@@ -351,11 +365,11 @@ function game.update(dt)
 	-- win/lose
 	if game.kills >= game.kills_goal then
 		game.outcome = "won"
-		game.end_timer = 1.2
+		game.end_timer = 2.5
 		print("[game] quest completed!")
 	elseif game.player.hp <= 0 then
 		game.outcome = "lost"
-		game.end_timer = 1.6
+		game.end_timer = 3.0
 		print("[game] you died")
 	end
 end

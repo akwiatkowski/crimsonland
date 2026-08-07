@@ -638,10 +638,16 @@ function game.update(dt)
 		game.outcome = "won"
 		game.end_timer = 1.2
 		print("[game] quest completed!")
+		require("src.game.save").mark_quest_completed(game.chapter, game.quest)
 	elseif game.player.hp <= 0 then
 		game.outcome = "lost"
 		game.end_timer = 1.6
 		print("[game] you died")
+		if game.mode == "survival" then
+			game.new_highscore = require("src.game.save").record_survival(
+				game.score, game.time, game.kills)
+			if game.new_highscore then print("[game] new local high score!") end
+		end
 	end
 end
 

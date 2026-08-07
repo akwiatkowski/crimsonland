@@ -52,6 +52,26 @@ function platform.current()
 	return profiles[platform.current_profile]
 end
 
+-- state snapshot for the save system (src/game/save.lua)
+function platform.export_state()
+	return {
+		profiles = profiles,
+		current_profile = platform.current_profile,
+		stats = stats,
+		globals = globals,
+	}
+end
+
+function platform.import_state(state)
+	if type(state.profiles) == "table" and #state.profiles > 0 then
+		profiles = state.profiles
+	end
+	platform.current_profile = state.current_profile or 1
+	if profiles[platform.current_profile] == nil then platform.current_profile = 1 end
+	if type(state.stats) == "table" then stats = state.stats end
+	if type(state.globals) == "table" then globals = state.globals end
+end
+
 -- ------------------------------------------------------------- extensions
 
 local extensions = {}

@@ -613,6 +613,7 @@ function engine.start()
 		canvas = love.graphics.newCanvas(screens.WIDTH, screens.HEIGHT)
 		compute_viewport()
 
+		require("src.game.save").load()
 		load_templates()
 		load_autoexec()
 		register_internal_screens()
@@ -620,6 +621,11 @@ function engine.start()
 
 		timeline.load()
 		timeline.begin(timeline.order[1]) -- "Title"
+	end
+
+	love.quit = function()
+		require("src.game.save").flush()
+		return false
 	end
 
 	love.update = function(dt)

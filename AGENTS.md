@@ -104,6 +104,10 @@ NX_SetCursor NX_GetInterface NX_GetTime NX_FileExists NX_Popup NX_CallExtension`
 - `perks.lua` — clean-room classic perk set as game.mods multipliers;
   PickAPerk comps are filled from the game layer (C++ did this originally)
 - `particles.lua` — hand-rolled FX layer (NOT the fxs/ DSL — still open)
+- `hud.lua` — in-game HUD from the original 2014 art (game/health_pie_*,
+  aim_circle/dot crosshair with reload sweep, progress-bar XP strip,
+  levelup-ring, white-vignette low-hp breathing); bone/blood/brass/toxic
+  palette; fonts via engine font module (small/medium/ammo.mft)
 - `save.lua` — platform state + progress to LÖVE save dir (identity
   crimsonland-mac), sandboxed load, flushed on quit/outcomes
 - Quest kill-count/spawn tables are approximations — original quest defs were

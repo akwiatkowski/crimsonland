@@ -7,6 +7,7 @@ local assets = require("src.engine.assets")
 local audio = require("src.engine.audio")
 local bms = require("src.game.bms")
 local data = require("src.game.data")
+local hud = require("src.game.hud")
 local particles = require("src.game.particles")
 local perks = require("src.game.perks")
 local quests = require("src.game.quests")
@@ -70,6 +71,7 @@ local POWERUPS = {
 }
 local POWERUP_BY_ID = {}
 for _, pu in ipairs(POWERUPS) do POWERUP_BY_ID[pu.id] = pu end
+game.POWERUPS = POWERUPS -- the HUD reads icons/durations for effect timers
 
 -- ------------------------------------------------------------ terrain bake
 
@@ -557,12 +559,14 @@ local function update_player(game, dt)
 		end
 	elseif love.keyboard.isDown("r") and p.ammo < game.clip_size() then
 		p.reloading = p.weapon.reload_time * game.mods.reload
+		p.reload_total = p.reloading -- HUD sweeps the crosshair arc from this
 		audio.play_sound(p.weapon.snd_reload)
 	end
 
 	if love.mouse.isDown(1) and p.reloading <= 0 and p.cooldown <= 0 then
 		if p.ammo <= 0 then
 			p.reloading = p.weapon.reload_time * game.mods.reload
+			p.reload_total = p.reloading
 			audio.play_sound(p.weapon.snd_reload)
 		else
 			p.cooldown = p.weapon.shoot_interval / game.mods.fire
@@ -995,6 +999,7 @@ function game.update(dt)
 		game.level = game.level + 1
 		game.xp_next = math.floor(game.xp_next * 1.5)
 		print(("[game] level up! now level %d"):format(game.level))
+		game.levelup_t = game.time -- HUD flashes the level-up ring
 		open_perk_screen(game)
 		return
 	end
@@ -1084,6 +1089,8 @@ function game.camera()
 end
 
 function game.draw()
+	-- the crosshair replaces the OS cursor while a session runs
+	love.mouse.setVisible(not game.active)
 	if not game.active then
 		-- menu backdrop
 		love.graphics.setColor(0.05, 0.02, 0.03, 1)
@@ -1208,53 +1215,14 @@ function game.draw()
 	end
 	love.graphics.setBlendMode("alpha")
 
+	hud.draw_levelup_ring(game, game.player.x, game.player.y)
 	particles.draw()
 
 	love.graphics.pop()
 
-	-- HUD (screen space)
-	love.graphics.setColor(1, 1, 1, 1)
-	love.graphics.printf(string.format("HP %d", math.max(0, math.floor(p.hp))), 10, 10, 200, "left")
-	love.graphics.printf(p.weapon
-		and string.format("%s  %d/%d%s", p.weapon.name or p.weapon.id,
-			p.ammo, game.clip_size(),
-			p.reloading > 0 and " (reloading)" or "")
-		or "BARE HANDS", 10, 30, 400, "left")
-	if game.mode == "quest" then
-		love.graphics.printf(string.format("KILLS %d/%d   SCORE %d   LEVEL %d",
-			game.kills, game.kills_goal, game.score, game.level), 10, 50, 600, "left")
-		love.graphics.printf(string.format("QUEST %d.%d (%s)", game.chapter, game.quest, game.difficulty),
-			SCREEN_W - 210, 10, 200, "right")
-	else
-		love.graphics.printf(string.format("KILLS %d   SCORE %d   LEVEL %d",
-			game.kills, game.score, game.level), 10, 50, 600, "left")
-		local label = game.mode:upper()
-		if game.mode == "waves" then
-			label = string.format("WAVE %d", math.max(1, game.wave))
-		end
-		love.graphics.printf(string.format("%s  %d:%02d", label,
-			math.floor(game.time / 60), math.floor(game.time % 60)),
-			SCREEN_W - 210, 10, 200, "right")
-	end
-	-- active powerup timers
-	local ey = 70
-	for id, left in pairs(game.effects) do
-		love.graphics.setColor(0.6, 1, 0.6, 1)
-		love.graphics.printf(string.format("%s %.0fs", id, math.ceil(left)),
-			10, ey, 300, "left")
-		ey = ey + 16
-	end
-	if game.death_clock then
-		love.graphics.setColor(1, 0.25, 0.25, 1)
-		love.graphics.printf(string.format("DEATH CLOCK %.1fs", game.death_clock),
-			10, ey, 300, "left")
-	end
-	love.graphics.setColor(1, 1, 1, 1)
-
-	if game.outcome then
-		love.graphics.printf(game.outcome == "won" and "QUEST COMPLETED!" or "YOU DIED",
-			0, SCREEN_H / 2 - 40, SCREEN_W, "center")
-	end
+	-- HUD (screen space): original 2014 art — health pie, crosshair with
+	-- reload sweep, XP strip, effect timers (src/game/hud.lua)
+	hud.draw(game)
 end
 
 -- ------------------------------------------------------ UI click routing

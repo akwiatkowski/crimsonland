@@ -47,6 +47,18 @@ local function progression_muls(chapter, quest, diff_mul)
 		DAMAGE_SCALE_BASE * ramp * diff_mul
 end
 
+-- weapon behavior classes (the XML flags don't encode these cleanly)
+local EXPLOSIVE = {
+	ROCKET_LAUNCHER = true, SEEKER_ROCKETS = true, MINI_ROCKET_SWARMERS = true,
+	ROCKET_MINIGUN = true, PULSE_GUN = true,
+}
+local FLAME = { FLAMETHROWER = true, BLOW_TORCH = true, HR_FLAMER = true }
+
+local DROP_WEAPON_CHANCE = 0.08
+local DROP_HEALTH_CHANCE = 0.06
+local PICKUP_RADIUS = 26
+local HEALTH_PACK_HEAL = 25
+
 -- ------------------------------------------------------------ terrain bake
 
 local function bake_terrain(chapter_id)
@@ -129,6 +141,9 @@ function game.start_quest(chapter, quest, difficulty)
 
 	game.creatures = {}
 	game.bullets = {}
+	game.drops = {}
+	-- highest weapon index that may drop; grows with chapter progress
+	game.weapon_cap = math.min(30, 6 + 5 * (chapter - 1))
 	particles.clear()
 	game.score = 0
 	game.xp = 0
@@ -232,19 +247,86 @@ local function update_player(game, dt)
 			p.ammo = p.ammo - 1
 			p.muzzle = 0.05
 			audio.play_sound(p.weapon.snd_fire, 1, 0, 1 + (love.math.random() - 0.5) / 6)
-			for _ = 1, p.weapon.num_projectiles do
-				local spread = (love.math.random() - 0.5) * p.weapon.recoil * 2
+			local w = p.weapon
+			-- flame weapons are short-ranged sprays; everything else uses
+			-- the XML range (rockets detonate when they run out)
+			local range = w.projectile_range * RANGE_SCALE
+			if FLAME[w.id] then range = range * 0.18 end
+			for _ = 1, w.num_projectiles do
+				local spread = (love.math.random() - 0.5) * w.recoil * 2
 				local a = p.angle + spread
 				game.bullets[#game.bullets + 1] = {
 					x = p.x + math.cos(p.angle) * 20,
 					y = p.y + math.sin(p.angle) * 20,
 					dx = math.cos(a),
 					dy = math.sin(a),
-					speed = p.weapon.projectile_speed * BULLET_SPEED_SCALE,
-					dist_left = p.weapon.projectile_range * RANGE_SCALE,
-					damage = p.weapon.projectile_damage,
+					speed = w.projectile_speed * BULLET_SPEED_SCALE,
+					dist_left = range * (FLAME[w.id] and (0.6 + love.math.random() * 0.4) or 1),
+					damage = w.damage_effective,
+					explosive = EXPLOSIVE[w.id] or nil,
+					flame = FLAME[w.id] or nil,
 				}
 			end
+		end
+	end
+end
+
+-- roll the powerup table where a creature died
+local function try_drop(game, x, y)
+	local roll = love.math.random()
+	if roll < DROP_WEAPON_CHANCE then
+		-- random weapon up to the current cap, never the one in hand
+		local pool = {}
+		for idx = 2, game.weapon_cap do
+			local w = data.weapon_order[idx]
+			if w and w ~= game.player.weapon then pool[#pool + 1] = w end
+		end
+		if #pool > 0 then
+			game.drops[#game.drops + 1] =
+				{ kind = "weapon", weapon = pool[love.math.random(#pool)], x = x, y = y, t = 0 }
+		end
+	elseif roll < DROP_WEAPON_CHANCE + DROP_HEALTH_CHANCE then
+		game.drops[#game.drops + 1] = { kind = "health", x = x, y = y, t = 0 }
+	end
+end
+
+--- Apply damage to a creature; handles the kill (gore, score, xp, drops).
+local function damage_creature(game, c, dmg)
+	if c.dying then return end
+	c.hp = c.hp - dmg
+	if c.hp <= 0 then
+		c.dying = true
+		c.die_t = 0
+		-- freeze facing so the gore anim + baked corpse keep it
+		c.rot = math.atan2(game.player.y - c.y, game.player.x - c.x) + math.pi / 2
+		particles.death_burst(c.x, c.y, c.variant.scale)
+		game.kills = game.kills + 1
+		game.score = game.score + c.variant.xp
+		game.xp = game.xp + c.variant.xp
+		try_drop(game, c.x, c.y)
+		local snd = c.def and c.def.sounds
+		if snd then
+			local picks = {}
+			for k, v in pairs(snd) do
+				if k:match("^snd_die") and v ~= "!NONE" then picks[#picks + 1] = v end
+			end
+			if #picks > 0 then audio.play_sound(picks[love.math.random(#picks)]) end
+		end
+	end
+end
+
+--- Rocket-class detonation: area damage with linear falloff to the edge.
+local function explode(game, x, y, base_damage)
+	local radius = 80
+	particles.explosion(x, y, radius)
+	audio.play_sound("sfx/explosion_medium")
+	for _, c in ipairs(game.creatures) do
+		local ddx, ddy = c.x - x, c.y - y
+		local dist = math.sqrt(ddx * ddx + ddy * ddy)
+		local reach = radius + 16 * c.variant.scale
+		if dist < reach then
+			local falloff = 1 - 0.7 * (dist / reach)
+			damage_creature(game, c, base_damage * 2 * falloff)
 		end
 	end
 end
@@ -257,39 +339,56 @@ local function update_bullets(game, dt)
 		b.y = b.y + b.dy * step
 		b.dist_left = b.dist_left - step
 		local dead = b.dist_left <= 0
+		-- rockets that reach max range detonate instead of fizzling
+		if dead and b.explosive then
+			explode(game, b.x, b.y, b.damage)
+		end
 		-- collide with creatures (circle radius ~16*scale)
 		if not dead then
 			for _, c in ipairs(game.creatures) do
-				local r = 16 * c.variant.scale + 6
-				local ddx, ddy = c.x - b.x, c.y - b.y
-				if ddx * ddx + ddy * ddy < r * r then
-					c.hp = c.hp - b.damage
-					dead = true
-					particles.blood(b.x, b.y, math.atan2(b.dy, b.dx))
-					if c.hp <= 0 and not c.dying then
-						c.dying = true
-						c.die_t = 0
-						-- freeze facing so the gore anim + baked corpse keep it
-						c.rot = math.atan2(game.player.y - c.y, game.player.x - c.x) + math.pi / 2
-						particles.death_burst(c.x, c.y, c.variant.scale)
-						game.kills = game.kills + 1
-						game.score = game.score + c.variant.xp
-						game.xp = game.xp + c.variant.xp
-						local snd = c.def and c.def.sounds
-						if snd then
-							local picks = {}
-							for k, v in pairs(snd) do
-								if k:match("^snd_die") and v ~= "!NONE" then picks[#picks + 1] = v end
-							end
-							if #picks > 0 then audio.play_sound(picks[love.math.random(#picks)]) end
+				if not c.dying then
+					local r = 16 * c.variant.scale + 6
+					local ddx, ddy = c.x - b.x, c.y - b.y
+					if ddx * ddx + ddy * ddy < r * r then
+						dead = true
+						if b.explosive then
+							explode(game, b.x, b.y, b.damage)
+						else
+							particles.blood(b.x, b.y, math.atan2(b.dy, b.dx))
+							damage_creature(game, c, b.damage)
 						end
+						break
 					end
-					break
 				end
 			end
 		end
 		if dead then
 			table.remove(game.bullets, i)
+		end
+	end
+end
+
+local function update_drops(game, dt)
+	local p = game.player
+	for i = #game.drops, 1, -1 do
+		local d = game.drops[i]
+		d.t = d.t + dt
+		local ddx, ddy = p.x - d.x, p.y - d.y
+		if ddx * ddx + ddy * ddy < PICKUP_RADIUS * PICKUP_RADIUS then
+			if d.kind == "weapon" then
+				p.weapon = d.weapon
+				p.ammo = d.weapon.clip_size
+				p.reloading = 0
+				p.cooldown = 0
+				audio.play_sound("sfx/unlock_weapon")
+			else
+				p.hp = math.min(p.max_hp, p.hp + HEALTH_PACK_HEAL)
+				audio.play_sound("sfx/ui_clink_01")
+			end
+			particles.sparkle(d.x, d.y)
+			table.remove(game.drops, i)
+		elseif d.t > 30 then
+			table.remove(game.drops, i) -- despawn eventually
 		end
 	end
 end
@@ -359,6 +458,7 @@ function game.update(dt)
 	update_player(game, dt)
 	update_bullets(game, dt)
 	update_creatures(game, dt)
+	update_drops(game, dt)
 	particles.update(dt)
 
 	-- spawner
@@ -421,6 +521,24 @@ function game.draw()
 	love.graphics.setColor(1, 1, 1, 1)
 	love.graphics.draw(game.terrain, 0, 0)
 
+	-- powerup drops (under everything alive)
+	local base_img = assets.image("powerups/base.png")
+	for _, d in ipairs(game.drops) do
+		local bob = math.sin(d.t * 3) * 3
+		local alpha = (d.t > 25) and (0.4 + 0.6 * math.abs(math.sin(d.t * 8))) or 1
+		love.graphics.setColor(1, 1, 1, alpha)
+		if base_img then
+			love.graphics.draw(base_img, d.x, d.y, 0, 0.7, 0.7,
+				base_img:getWidth() / 2, base_img:getHeight() / 2)
+		end
+		local icon = assets.image(d.kind == "weapon" and d.weapon.icon
+			or "powerups/powerup-medikit.png")
+		if icon then
+			love.graphics.draw(icon, d.x, d.y - 4 + bob, 0, 0.5, 0.5,
+				icon:getWidth() / 2, icon:getHeight() / 2)
+		end
+	end
+
 	-- creatures (shadow under, then body)
 	for _, c in ipairs(game.creatures) do
 		local def = c.def
@@ -475,10 +593,17 @@ function game.draw()
 		end
 	end
 
-	-- bullets
-	love.graphics.setColor(1, 1, 0.6, 1)
+	-- bullets (flame projectiles draw as fading fireballs)
 	for _, b in ipairs(game.bullets) do
-		love.graphics.circle("fill", b.x, b.y, 2.5)
+		if b.flame then
+			love.graphics.setBlendMode("add")
+			love.graphics.setColor(1, 0.55, 0.15, 0.8)
+			love.graphics.circle("fill", b.x, b.y, 5 + love.math.random() * 3)
+			love.graphics.setBlendMode("alpha")
+		else
+			love.graphics.setColor(1, 1, 0.6, 1)
+			love.graphics.circle("fill", b.x, b.y, 2.5)
+		end
 	end
 
 	particles.draw()
@@ -488,8 +613,9 @@ function game.draw()
 	-- HUD (screen space)
 	love.graphics.setColor(1, 1, 1, 1)
 	love.graphics.printf(string.format("HP %d", math.max(0, math.floor(p.hp))), 10, 10, 200, "left")
-	love.graphics.printf(string.format("AMMO %d/%d%s", p.ammo, p.weapon.clip_size,
-		p.reloading > 0 and " (reloading)" or ""), 10, 30, 300, "left")
+	love.graphics.printf(string.format("%s  %d/%d%s", p.weapon.name or p.weapon.id,
+		p.ammo, p.weapon.clip_size,
+		p.reloading > 0 and " (reloading)" or ""), 10, 30, 400, "left")
 	love.graphics.printf(string.format("KILLS %d/%d   SCORE %d   LEVEL %d",
 		game.kills, game.kills_goal, game.score, game.level), 10, 50, 600, "left")
 	love.graphics.printf(string.format("QUEST %d.%d (%s)", game.chapter, game.quest, game.difficulty),

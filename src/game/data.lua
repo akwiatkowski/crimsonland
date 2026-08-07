@@ -41,9 +41,22 @@ function data.load_weapons()
 			projectile_speed = to_num(a.projectile_speed, 50),
 			projectile_damage = to_num(a.projectile_damage, 1),
 			projectile_range = to_num(a.projectile_range, 300),
+			stat_damage = to_num(a.stat_damage, 0.3),
 			icon = a.bm_icon and ("weapons/" .. a.bm_icon) or nil,
 			ammo_icon = a.ammo_icon,
 		}
+		-- Effective per-projectile damage. Most weapons ship
+		-- projectile_damage="1" (real DPS was computed in the C++ engine);
+		-- only a few carry hand-authored values (pistol 4.1, plasma rifle
+		-- 10, ...). Derive the rest from the stat_damage rating, calibrated
+		-- so the pistol's derived DPS matches its authored value:
+		-- pistol dps = 4.1 / 0.7117 = 5.76 at stat 0.3 -> dps = 19.2 * stat.
+		if w.projectile_damage > 1.5 then
+			w.damage_effective = w.projectile_damage
+		else
+			w.damage_effective = 19.2 * w.stat_damage * w.shoot_interval
+				/ math.max(1, w.num_projectiles)
+		end
 		data.weapons[w.id] = w
 		data.weapon_order[w.index] = w
 	end

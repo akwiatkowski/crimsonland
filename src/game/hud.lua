@@ -117,15 +117,22 @@ local function draw_weapon(game)
 		return
 	end
 
-	local ammo_str = ("%d/%d"):format(p.ammo, game.clip_size())
-	text_right(F_AMMO, ammo_str, rx, by - 34, BRASS)
+	-- ammo.mft is a 7-segment display: digits carry their own unlit plate, and
+	-- there is no '/' in it, so the magazine size rides alongside in the small
+	-- font instead of inside the counter.
+	local clip_str = ("/%d"):format(game.clip_size())
+	local clip_w = font.measure(F_SMALL, clip_str)
+	font.draw(F_SMALL, clip_str, rx - clip_w, by - 24, BONE)
+	local ammo_str = ("%d"):format(p.ammo)
+	text_right(F_AMMO, ammo_str, rx - clip_w - 4, by - 34, BRASS)
 	text_right(F_SMALL, p.weapon.name or p.weapon.id, rx, by - 52, BONE)
 
 	local icon = assets.image(p.weapon.icon)
 	if icon then
 		love.graphics.setColor(1, 1, 1, 0.95)
 		local s = math.min(1, 40 / icon:getHeight())
-		love.graphics.draw(icon, rx - font.measure(F_AMMO, ammo_str) - 14 - icon:getWidth() * s,
+		love.graphics.draw(icon,
+			rx - clip_w - font.measure(F_AMMO, ammo_str) - 18 - icon:getWidth() * s,
 			by - 36, 0, s, s)
 	end
 
@@ -149,7 +156,8 @@ local function draw_mode_tag(game)
 	local tag
 	if game.mode == "quest" then
 		local ROMAN = { "I", "II", "III", "IV", "V", "VI", "VII" }
-		tag = ("%s · %d   %s"):format(ROMAN[game.chapter] or game.chapter,
+		-- the .mft fonts are LATIN-1 and carry no middle dot, so use a dash
+		tag = ("%s - %d   %s"):format(ROMAN[game.chapter] or game.chapter,
 			game.quest, game.difficulty)
 	else
 		local label = game.mode:upper()

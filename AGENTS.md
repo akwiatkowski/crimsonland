@@ -40,6 +40,17 @@ Files inside are verbatim PNG / Ogg / XML / Lua — no per-file compression.
 - `vendor/assets-music/` — 8 OGG 44.1kHz, `vendor/assets-sfx/` — 105 OGG
 - Scripts use custom include: `LuaInclude("ui/common-ui-funcs.lua")`
 
+### MEG_Font_v6 (.mft) bitmap fonts — decoded (full spec in `src/engine/mft.lua`)
+Header + 256 fixed 271-byte glyph records in codepoint order, each followed by
+its inline RGBA8 pixels (white, coverage in alpha). The record carries y-offset,
+advance and a 256-entry int8 kerning row (A/V = -4). Parsing all three fonts
+consumes each file to its exact last byte — that is the proof the layout is right.
+- Encoding is **LATIN-1**, so UTF-8 source strings must be folded back
+  (`·` would otherwise print as `Â·`); the fonts have no middle dot at all.
+- `fonts/ammo.mft` is a 7-segment display: `0`-`9` are lit digits that already
+  include their dark unlit plate, `a`-`j` a second inverted set, and there is
+  **no `/`** — the magazine size has to be drawn in another font.
+
 ### Resolution / retina (measured, LÖVE 11.5)
 - The 1080p pak is the *same* art at exactly **1080/640 = 1.6875x** (verified
   across the set: 90px -> 151px, 13x23 -> 21x38). Drop-in via per-image dpiscale.

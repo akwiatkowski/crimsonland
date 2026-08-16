@@ -124,8 +124,9 @@ function nx.NX_DrawSubBitmap(bm, x, y, sx, sy, sw, sh)
 	local img = assets.image(bm)
 	if not img then return end
 	apply_state()
-	local q = love.graphics.newQuad(sx, sy, sw, sh, img:getWidth(), img:getHeight())
-	love.graphics.draw(img, q, x, y)
+	-- scripts speak reference units; assets.quad maps them onto the texels
+	local q, s = assets.quad(img, sx, sy, sw, sh)
+	love.graphics.draw(img, q, x, y, 0, s, s)
 end
 
 function nx.NX_DrawRect(x, y, w, h)

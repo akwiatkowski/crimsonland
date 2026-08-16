@@ -40,6 +40,7 @@ end
 -- --------------------------------------------------------------- captures
 
 local ramp = " .:-=+*#%@"
+local shot_idx = 0
 
 --- Dump screen stack, game state, clickable rects and an ASCII rendering of
 -- the reference canvas — everything needed to verify behavior from a log.
@@ -72,6 +73,14 @@ function harness.capture()
 	if not canvas then return end
 	local data = canvas:newImageData()
 	local W, H = data:getDimensions()
+
+	-- ASCII is enough to verify layout and state, but not rendering quality —
+	-- dump the frame too (LÖVE save dir) so retina/font work can be eyeballed
+	shot_idx = shot_idx + 1
+	local shot = string.format("capture-%02d.png", shot_idx)
+	data:encode("png", shot)
+	print(("  frame -> %s%s"):format(love.filesystem.getSaveDirectory(), "/" .. shot))
+
 	local cols, rows = 96, 32
 	local out = { string.format("=== canvas capture %dx%d ===", W, H) }
 	for row = 0, rows - 1 do

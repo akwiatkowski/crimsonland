@@ -11,7 +11,7 @@
 --       f32 unused, f32 unused
 --   PNG atlas (all frames packed, standard PNG stream to EOF)
 
-local paths = require("src.engine.paths")
+local assets = require("src.engine.assets")
 
 local bms = {}
 
@@ -23,8 +23,10 @@ function bms.load(path)
 	if cache[path] ~= nil then
 		return cache[path] or nil
 	end
-	local full = paths.ASSETS .. "/" .. path
-	local data = love.filesystem.read(full)
+	-- the 1080p pak carries every .bms; its atlases are denser by `density`,
+	-- which bms.draw divides out so callers keep working in reference units
+	local full, density = assets.resolve(path)
+	local data = full and love.filesystem.read(full)
 	if not data then
 		cache[path] = false
 		return nil
@@ -90,6 +92,7 @@ function bms.load(path)
 		count = n,
 		frame_w = fw,
 		frame_h = fh,
+		density = density,
 	}
 	cache[path] = seq
 	return seq
@@ -100,8 +103,11 @@ function bms.draw(seq, idx, x, y, rot, scale)
 	if not seq or seq.count == 0 then return end
 	idx = ((idx - 1) % seq.count) + 1
 	local f = seq.frames[idx]
-	love.graphics.draw(seq.image, seq.quads[idx], x, y, rot or 0,
-		scale or 1, scale or 1, f.w / 2, f.h / 2)
+	-- quads address texels, so the atlas density has to come out of the scale;
+	-- the origin stays in texels because that is the quad's own space
+	local s = (scale or 1) / seq.density
+	love.graphics.draw(seq.image, seq.quads[idx], x, y, rot or 0, s, s,
+		f.w / 2, f.h / 2)
 end
 
 return bms

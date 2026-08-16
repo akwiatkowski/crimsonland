@@ -16,13 +16,24 @@ local SIZE_FALLBACKS = {
 }
 
 local font_cache = {}
+local render_scale = 1
+
+--- Rasterize glyphs for a render target of this density (device pixels per
+-- reference unit). LÖVE keeps font metrics in reference units regardless, so
+-- callers and layouts never see the difference — only the texture gets sharper.
+function font.set_render_scale(scale)
+	if math.abs(scale - render_scale) < 0.01 then return end
+	render_scale = scale
+	font_cache = {}
+end
 
 function font.get(path)
 	path = path or "fonts/small.mft"
 	if font_cache[path] then return font_cache[path] end
 	local size = assets.font_size(path) or SIZE_FALLBACKS[path] or 16
 	-- header value is the line height; glyph em is a bit smaller
-	local f = love.graphics.newFont(math.max(8, math.floor(size * 1.0)))
+	local f = love.graphics.newFont(math.max(8, math.floor(size * 1.0)),
+		"normal", render_scale)
 	font_cache[path] = f
 	return f
 end

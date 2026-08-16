@@ -284,8 +284,8 @@ function comps.draw_ninepatch(comp, w, h)
 	if dcw < 0 or dch < 0 then return end
 	local function quad(sx, sy, sw, sh, dx, dy, dw, dh)
 		if sw <= 0 or sh <= 0 or dw <= 0 or dh <= 0 then return end
-		local q = love.graphics.newQuad(sx, sy, sw, sh, iw, ih)
-		love.graphics.draw(img, q, dx, dy, 0, dw / sw, dh / sh)
+		local q, s = assets.quad(img, sx, sy, sw, sh)
+		love.graphics.draw(img, q, dx, dy, 0, dw / sw * s, dh / sh * s)
 	end
 	quad(0, 0, lw, th, 0, 0, lw, th)
 	quad(cl, 0, cw, th, lw, 0, dcw, th)
@@ -372,8 +372,8 @@ function comps.draw_slider(comp, w, h)
 	local full = assets.image(p["slider.bm_full"])
 	if full and value > 0 then
 		local fw = full:getWidth() * math.max(0, math.min(1, value))
-		local q = love.graphics.newQuad(0, 0, fw, full:getHeight(), full:getWidth(), full:getHeight())
-		love.graphics.draw(full, q, 0, 0)
+		local q, s = assets.quad(full, 0, 0, fw, full:getHeight())
+		love.graphics.draw(full, q, 0, 0, 0, s, s)
 	end
 	local marker = assets.image(p["slider.bm_marker"])
 	if marker then

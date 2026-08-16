@@ -40,12 +40,19 @@ Done:
 
 - [x] Pause menu (Esc), timed powerups (nuke/freeze/shield/points/speed/fire),
       authored quest definitions with chapter palettes and quest-10 bosses
+- [x] XML-driven creature AI (shooters, dens), 25-perk roster with gambles
+- [x] Endless-mode family: Rush, Blitz, Waves, Nukefism, Weapon Picker
+- [x] Mod architecture (engine = console, `mods/` = cartridges, `--mod=<name>`)
+- [x] In-game HUD rebuilt from the original 2014 art (crosshair, health pie,
+      ammo, XP strip, powerup chips)
 
 Next:
 
+- [ ] HUD/render crispness on Mac retina (canvas upscale + DPI strategy)
 - [ ] Original `fxs/` particle DSL interpreter (current FX layer is hand-rolled)
-- [ ] Remaining survival submodes (Rush, Weapon Picker, Nukefism, Blitz, Waves)
+- [ ] `.mft` bitmap font decoder — real letterforms in HUD and menus
 - [ ] Quest unlock gating + HighScores/Statistics screens fed from the save data
+- [ ] Mod arch phase 2: move `src/game/` into `mods/vanilla/`
 
 ## Rebuilding from scratch
 

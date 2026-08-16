@@ -40,6 +40,23 @@ Files inside are verbatim PNG / Ogg / XML / Lua — no per-file compression.
 - `vendor/assets-music/` — 8 OGG 44.1kHz, `vendor/assets-sfx/` — 105 OGG
 - Scripts use custom include: `LuaInclude("ui/common-ui-funcs.lua")`
 
+### Resolution / retina (measured, LÖVE 11.5)
+- The 1080p pak is the *same* art at exactly **1080/640 = 1.6875x** (verified
+  across the set: 90px -> 151px, 13x23 -> 21x38). Drop-in via per-image dpiscale.
+- LÖVE 11.5 semantics that make the whole port resolution-independent for free:
+  - `newImage(f, {dpiscale=d})` — `getWidth()` and plain `draw()` stay in
+    reference units (±1px rounding), only the texture is denser.
+  - `newCanvas(w, h, {dpiscale=d})` — allocates `w*d x h*d` pixels but still
+    accepts reference coordinates. This is why nothing above `compute_viewport`
+    knows about resolution.
+  - `newFont(size, hinting, d)` — identical metrics, glyphs rasterized at `d`.
+  - **Quads are the exception**: they address raw texels and are drawn at their
+    literal pixel size, ignoring dpiscale. Every quad site must go through
+    `assets.quad()` (or divide by `seq.density` as `bms.draw` does).
+- `t.window.highdpi = true` is required or macOS renders 1x and upscales the
+  window itself; `love.graphics.getDimensions()` stays in *window units* either
+  way (`getPixelDimensions()` is the pixel one), so mouse math is unaffected.
+
 ### Engine Lua API (61 NX_* functions, from `strings prog.dll`)
 Rendering: `NX_LoadBitmap NX_GetBitmap NX_DrawBitmap NX_DrawBitmapS NX_DrawBitmapRS
 NX_DrawBitmapMirroredRS NX_DrawBitmapAligned NX_DrawSubBitmap NX_CreateBitmap

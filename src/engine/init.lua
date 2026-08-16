@@ -624,12 +624,34 @@ engine.draw_internal = draw_internal
 
 local canvas = nil
 local canvas_scale, canvas_ox, canvas_oy = 1, 0, 0
+local render_scale = 0 -- reference unit -> device pixel
 
+--- Size the letterboxed viewport and (re)allocate the render target.
+--
+-- Everything above this line draws in 960x640 reference units. What changes
+-- with the display is only how many device pixels one reference unit is worth:
+-- window scale (letterbox fit) x OS backing scale (2 on retina). Allocating
+-- the canvas with that as its dpiscale makes LÖVE rasterize at the exact final
+-- pixel count while still accepting reference coordinates — so the blit below
+-- is 1:1 and nothing is ever resampled.
 local function compute_viewport()
-	local ww, wh = love.graphics.getDimensions()
+	local ww, wh = love.graphics.getDimensions() -- window units, not pixels
 	canvas_scale = math.min(ww / screens.WIDTH, wh / screens.HEIGHT)
 	canvas_ox = (ww - screens.WIDTH * canvas_scale) / 2
 	canvas_oy = (wh - screens.HEIGHT * canvas_scale) / 2
+
+	local wanted = canvas_scale * love.window.getDPIScale()
+	if math.abs(wanted - render_scale) > 0.01 then
+		render_scale = wanted
+		canvas = love.graphics.newCanvas(screens.WIDTH, screens.HEIGHT,
+			{ dpiscale = render_scale })
+		font.set_render_scale(render_scale) -- rasterize glyphs at device size
+	end
+end
+
+--- Device pixels per reference unit, for anything that rasterizes its own art.
+function engine.render_scale()
+	return render_scale
 end
 
 function engine.to_reference(x, y)
@@ -646,8 +668,9 @@ function engine.start()
 
 	love.load = function()
 		love.graphics.setDefaultFilter("linear", "linear", 4)
-		canvas = love.graphics.newCanvas(screens.WIDTH, screens.HEIGHT)
 		compute_viewport()
+		-- above 1x the 1080p art set is worth its VRAM; below it only costs
+		assets.hires = render_scale > 1.05
 
 		if mod.current == nil then mod.select("vanilla") end
 		if mod.current.save.load then mod.current.save.load() end

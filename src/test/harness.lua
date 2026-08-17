@@ -59,6 +59,9 @@ function harness.capture()
 			tostring(game.kills_goal or "inf"), #game.creatures, #game.bullets))
 	end
 
+	local fx = require("src.engine.fx")
+	if fx.count() > 0 then print(("  fx particles=%d"):format(fx.count())) end
+
 	local top = screens.top()
 	if top then
 		for _, c in ipairs(top.comps) do
@@ -125,6 +128,9 @@ function harness.install(scenario_name)
 			step_idx = step_idx + 1
 			if step.click then harness.click(step.click) end
 			if step.key then harness.key(step.key) end
+			-- escape hatch for subsystems a player cannot reach from input
+			-- alone (the game polls love.mouse.isDown, which cannot be faked)
+			if step.run then step.run() end
 		end
 		if captures[capture_idx] and elapsed >= captures[capture_idx] then
 			capture_idx = capture_idx + 1

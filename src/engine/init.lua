@@ -9,6 +9,7 @@ local assets = require("src.engine.assets")
 local audio = require("src.engine.audio")
 local comps = require("src.engine.comps")
 local font = require("src.engine.font")
+local fx = require("src.engine.fx")
 local mod = require("src.engine.mod")
 local nx = require("src.engine.nx")
 local paths = require("src.engine.paths")
@@ -457,7 +458,11 @@ API.GetPathPointAt = function() return 0, 0 end
 API.AddFX = stub("AddFX")
 API.CacheFX = stub("CacheFX")
 API.SpawnFX = stub("SpawnFX")
-API.SpawnEmitterFX = stub("SpawnEmitterFX")
+-- scripts name their emitters ("shells_1") for reuse; we spawn per call, so
+-- the name is only of interest to the C++ pooling we do not have
+API.SpawnEmitterFX = function(_name, path, x, y, rot)
+	fx.spawn(path, x or 0, y or 0, rot or 0)
+end
 API.PartBurstParm = stub("PartBurstParm")
 API.LoadUI = stub("LoadUI")
 API.EnableIdleTimer = function() end
@@ -478,7 +483,9 @@ API.LM_ShowLeaderboards = stub("LM_ShowLeaderboards")
 API.IAP_GetNumberOfCredits = function() return 0 end
 API.IAP_OpenOffers = stub("IAP_OpenOffers")
 
--- FX DSL (fxs/*.lua): declarative particle params — collected, not yet drawn
+-- FX DSL (fxs/*.lua) is interpreted by src/engine/fx.lua, which binds these
+-- three inside the effect file's own environment; at UI-script scope they are
+-- meaningless, so they stay no-ops here.
 API.FXParm = function(...) end
 API.PartFXParm = function(...) end
 API.PartFXAddNew = function(...) end
@@ -693,6 +700,7 @@ function engine.start()
 		audio.update(dt)
 		timeline.update(dt)
 		screens.update(dt)
+		fx.update(dt)
 	end
 
 	love.draw = function()
@@ -705,6 +713,7 @@ function engine.start()
 			end
 		end
 		screens.draw()
+		fx.draw() -- screen-space emitters (menu shell casings, unlock bursts)
 		love.graphics.setCanvas()
 		love.graphics.setColor(1, 1, 1, 1)
 		love.graphics.draw(canvas, canvas_ox, canvas_oy, 0, canvas_scale, canvas_scale)

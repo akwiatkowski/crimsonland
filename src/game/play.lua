@@ -7,6 +7,7 @@ local assets = require("src.engine.assets")
 local audio = require("src.engine.audio")
 local bms = require("src.game.bms")
 local data = require("src.game.data")
+local fx = require("src.engine.fx")
 local hud = require("src.game.hud")
 local particles = require("src.game.particles")
 local perks = require("src.game.perks")
@@ -158,6 +159,7 @@ local function init_session(terrain_chapter)
 	game.pending_perks = 0 -- extra picks queued by Instant Winner & friends
 	game.death_clock = nil -- seconds left once the Death Clock perk is taken
 	particles.clear()
+	fx.clear("world") -- brass from the previous run must not follow the player
 	game.score = 0
 	game.xp = 0
 	game.level = 1
@@ -573,6 +575,9 @@ local function update_player(game, dt)
 			p.ammo = p.ammo - 1
 			p.muzzle = 0.05
 			audio.play_sound(p.weapon.snd_fire, 1, 0, 1 + (love.math.random() - 0.5) / 6)
+			-- brass, on the original's own emitter parameters and shell art
+			fx.spawn("fxs/shells1.lua", p.x + math.cos(p.angle) * 14,
+				p.y + math.sin(p.angle) * 14, math.deg(p.angle), "world")
 			local w = p.weapon
 			game.shots = game.shots + 1
 			-- flame weapons are short-ranged sprays; everything else uses
@@ -1217,6 +1222,7 @@ function game.draw()
 
 	hud.draw_levelup_ring(game, game.player.x, game.player.y)
 	particles.draw()
+	fx.draw("world") -- inside the camera transform: spent brass on the ground
 
 	love.graphics.pop()
 

@@ -28,6 +28,9 @@ return {
 	{ t = 6.5, run = spawn("mods/vanilla/fxs/gore.lua", 420, 300, 0) },
 	{ t = 6.5, run = spawn("mods/vanilla/fxs/explosion.lua", 680, 300, 0) },
 	{ t = 6.5, run = spawn("mods/vanilla/fxs/pickup.lua", 870, 480, 0) },
+	-- the ice a frozen creature sheds when the field thaws: four emitters,
+	-- one per fragment sprite the pak ships
+	{ t = 6.5, run = spawn("mods/vanilla/fxs/ice-shatter.lua", 780, 180, 0) },
 	-- 6.6 catches the explosion flash near its peak (it dies at 0.22-0.28s),
 	-- 6.9 the fireball and sparks, 7.6 the smoke that outlives them
 	captures = { 2.3, 2.7, 3.7, 4.7, 6.0, 6.6, 6.9, 7.6 },

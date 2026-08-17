@@ -8,6 +8,7 @@ local audio = require("src.engine.audio")
 local bms = require("mods.vanilla.game.bms")
 local data = require("mods.vanilla.game.data")
 local fx = require("src.engine.fx")
+local gibs = require("mods.vanilla.game.gibs")
 local hud = require("mods.vanilla.game.hud")
 local ai_player = require("mods.vanilla.game.ai_player")
 local input = require("mods.vanilla.game.input")
@@ -243,8 +244,10 @@ local function init_session(terrain_chapter)
 	game.death_clock = nil -- seconds left once the Death Clock perk is taken
 	game.custom = nil -- the authored quest being played, if any
 	game.custom_next = 1
-	-- brass, blood and smoke from the previous run must not follow the player
+	-- brass, blood and smoke from the previous run must not follow the player,
+	-- and neither may body parts still in the air when it ended
 	fx.clear("world")
+	gibs.clear()
 	game.score = 0
 	game.xp = 0
 	game.level = 1
@@ -506,6 +509,9 @@ local function add_creature(game, variant, x, y, is_boss)
 		anim_t = love.math.random() * 2,
 		attack_cd = 0,
 		is_boss = is_boss or nil,
+		-- which of the four ice blocks encases this one when it freezes, so a
+		-- frozen crowd is not four identical cubes repeated
+		ice_frame = love.math.random(1, 4),
 	}
 	if variant.weapon_id then
 		c.fire_cd = variant.fire_interval
@@ -859,6 +865,8 @@ local function update_player(game, dt)
 					explosive = EXPLOSIVE[w.id] or nil,
 					flame = FLAME[w.id] or nil,
 					fire = game.effects.FIRE_BULLETS and true or nil,
+					-- which sprite off game/projs.tga this round wears
+					art = w.proj_art,
 				}
 			end
 		end
@@ -936,6 +944,12 @@ function damage_creature(game, c, dmg)
 		c.rot = c.fixed_rot
 			or math.atan2(game.player.y - c.y, game.player.x - c.x) + math.pi / 2
 		particles.death_burst(c.x, c.y, c.variant.scale)
+		-- the parts creatures.xml says this creature is made of
+		gibs.spawn(c)
+		-- something killed while encased sheds its ice with the rest of it
+		if game.effects.FREEZE then
+			particles.ice_shatter(c.x, c.y, c.variant.scale)
+		end
 		game.kills = game.kills + 1
 		-- Home Wrecker counts nests: a den is a creature that hatches others
 		if c.spawn_cd and not game.demo then
@@ -1422,6 +1436,7 @@ function game.update(dt)
 		game.end_timer = game.end_timer - dt
 		-- let the gore finish, then hand over to the original end screens
 		update_creatures(game, dt)
+		gibs.update(dt, game.terrain)
 		if game.end_timer <= 0 and not game.end_screen_pushed then
 			game.end_screen_pushed = true
 			game.open_end_screen()
@@ -1443,9 +1458,19 @@ function game.update(dt)
 	end
 
 	-- timed powerup effects tick down
+	local was_frozen = game.effects.FREEZE
 	for id, left in pairs(game.effects) do
 		left = left - dt
 		game.effects[id] = (left > 0) and left or nil
+	end
+	-- the field thaws all at once, so every creature still standing sheds its
+	-- cube in the same frame
+	if was_frozen and not game.effects.FREEZE then
+		for _, c in ipairs(game.creatures) do
+			if not c.dying then
+				particles.ice_shatter(c.x, c.y, c.variant.scale)
+			end
+		end
 	end
 
 	update_player(game, dt)
@@ -1453,6 +1478,8 @@ function game.update(dt)
 	update_creatures(game, dt)
 	update_ebullets(game, dt)
 	update_drops(game, dt)
+	-- parts in flight settle into the ground they land on
+	gibs.update(dt, game.terrain)
 
 	-- boss entrance at 60% of the kill goal
 	if game.boss_pending > 0 and game.kills_goal
@@ -1595,6 +1622,143 @@ function game.camera()
 	return cx, cy
 end
 
+-- Every creature in creatures.xml names a `bm_shadow` (a soft dark blob,
+-- circle or ellipse) and the trooper names one too. Drawn at the creature's
+-- own scale, under everything alive, which is what stops the sprites reading
+-- as stickers laid on the ground.
+local SHADOW_ALPHA = 0.5
+
+-- Seconds a dying creature's shadow takes to go. Without the fade it blinks
+-- out on the frame the death starts, while the body is still body-shaped.
+local SHADOW_FADE = 0.6
+
+local function draw_shadow(def, x, y, scale, fade)
+	local img = def and def.shadow and assets.image(def.shadow)
+	if not img then return end
+	local a = SHADOW_ALPHA * (fade or 1)
+	if a <= 0 then return end
+	love.graphics.setColor(1, 1, 1, a)
+	love.graphics.draw(img, x, y, 0, scale, scale,
+		img:getWidth() / 2, img:getHeight() / 2)
+end
+
+--- A creature whose whole body has changed colour: frozen solid, or rotting
+-- from Poison Bullets. Returns nil when the creature is its normal self.
+-- Three return values rather than a table: this runs per creature per frame.
+local function state_tint(game, c)
+	if c.dying then return nil end
+	local v = c.variant
+	if game.effects.FREEZE then
+		return v.r * 0.5, v.g * 0.7, math.min(1, v.b + 0.5)
+	end
+	if c.poison_t then
+		return v.r * 0.6, math.min(1, v.g + 0.4), v.b * 0.6
+	end
+	return nil
+end
+
+--- One creature: its body, in its variant's colour, wearing ice if the field
+-- is frozen.
+--
+-- On the variant colour, and why it multiplies the whole sprite: seven of the
+-- creatures pair their animation with a `*-stencil.bms` -- the same frames,
+-- but only a small region opaque, in grey, and inside that region the base's
+-- luma and the stencil's grey agree to ~12/255. That reads like a mask for
+-- recolouring, so this port tried it: body untinted, stencil over it in the
+-- variant colour. Rendered out against the real variant colours it is plainly
+-- worse. The region is a couple of stripes along the back, so every variant
+-- comes out the same pale creature with differently coloured piping, and the
+-- colour coding that tells a player which alien is the dangerous one is gone.
+-- Multiplying the whole sprite is what makes a blue one read as a different
+-- creature from a green one, so that is what stays. What the stencils are
+-- actually for is still unknown (a hit flash and a shader mask are both
+-- plausible) -- data.lua parses them, nothing draws them.
+local function draw_creature(game, c)
+	local def, v = c.def, c.variant
+	local seq, frame, rot
+
+	if c.dying then
+		seq = def and def.die and bms.load(def.die)
+		if seq then
+			frame = math.min(seq.count,
+				math.floor(c.die_t * 24 * (def.die_speed or 1)) + 1)
+		end
+		rot = c.rot or 0
+	else
+		seq = def and def.move and bms.load(def.move)
+		if seq then
+			frame = math.floor(c.anim_t * 24 * (def.move_speed or 1)) + 1
+		end
+		rot = c.fixed_rot -- dens/nests don't track the player
+			or math.atan2(game.player.y - c.y, game.player.x - c.x) + math.pi / 2
+	end
+
+	local tr, tg, tb = state_tint(game, c)
+	if not tr then tr, tg, tb = v.r, v.g, v.b end
+	love.graphics.setColor(tr, tg, tb, 1)
+
+	if not seq then
+		love.graphics.circle("fill", c.x, c.y, 14 * v.scale)
+		return
+	end
+	bms.draw(seq, frame, c.x, c.y, rot, v.scale)
+
+	-- Encased: game/ice-cube.bms is four blocks rather than an animation, so
+	-- each creature holds the one it was given. The block is a 64px frame, the
+	-- same as the creature it covers, and drawn at its own size it swallows
+	-- the thing whole -- a frozen enemy you cannot identify is still a target
+	-- you have to shoot. At 0.8 the legs and antennae stay outside the ice.
+	if game.effects.FREEZE and not c.dying then
+		local ice = bms.load("game/ice-cube.bms")
+		if ice then
+			love.graphics.setColor(1, 1, 1, 0.7)
+			bms.draw(ice, c.ice_frame or 1, c.x, c.y, 0, v.scale * 0.8)
+		end
+	end
+end
+
+-- game/projs.tga is the projectile sheet the original drew rounds from: a
+-- 128x128 image with four sprites on it, located by scanning it for opaque
+-- regions. Which weapon wears which is data (data.lua's projectile_art
+-- reads weapons.xml's own type/flags). The fourth sprite -- a wide white
+-- dome at (5,26,55,27) -- matches nothing this port fires, so it is left
+-- alone rather than guessed into service.
+-- How far a kinetic round's trail reaches back. Long enough to read as a
+-- tracer at the speeds in BULLET_SPEED_SCALE, short enough that a minigun
+-- does not draw a solid line to whatever it is pointed at.
+local BULLET_TRAIL = 22
+
+local PROJ_SHEET = "game/projs.tga"
+local PROJ_RECT = {
+	rocket = { 104, 5, 16, 20 },
+	glow = { 69, 5, 22, 22 },
+	blade = { 66, 34, 29, 29 },
+}
+local proj_cache = {}
+
+--- Draw one sheet sprite centered at x,y. Quads address texels, so the
+-- origin is in texels too and the draw scale carries the atlas density out
+-- (assets.quad's second return) -- the same dance fx.draw does.
+local function draw_proj(name, x, y, rot, scale, r, g, b, a, additive)
+	local img = assets.image(PROJ_SHEET)
+	if not img then return false end
+	local s = proj_cache[name]
+	if not s then
+		local rect = PROJ_RECT[name]
+		local quad, qs = assets.quad(img, rect[1], rect[2], rect[3], rect[4])
+		local _, _, qw, qh = quad:getViewport()
+		s = { quad = quad, scale = qs, w = qw, h = qh }
+		proj_cache[name] = s
+	end
+	if additive then love.graphics.setBlendMode("add") end
+	love.graphics.setColor(r, g, b, a)
+	local draw_scale = scale * s.scale
+	love.graphics.draw(img, s.quad, x, y, rot, draw_scale, draw_scale,
+		s.w / 2, s.h / 2)
+	if additive then love.graphics.setBlendMode("alpha") end
+	return true
+end
+
 function game.draw()
 	-- the crosshair replaces the OS cursor while a session runs; the demo is
 	-- not being played by the person holding the mouse, so they keep theirs
@@ -1639,37 +1803,23 @@ function game.draw()
 		end
 	end
 
-	-- creatures (shadow under, then body; frozen ones tint ice-blue)
-	local frozen = game.effects.FREEZE
+	-- shadows first, all of them, then the bodies: a shadow belongs to the
+	-- ground, so it must not fall across the neighbour standing next to it
 	for _, c in ipairs(game.creatures) do
-		local def = c.def
-		local v = c.variant
-		if frozen and not c.dying then
-			love.graphics.setColor(v.r * 0.5, v.g * 0.7, math.min(1, v.b + 0.5), 1)
-		elseif c.poison_t and not c.dying then
-			love.graphics.setColor(v.r * 0.6, math.min(1, v.g + 0.4), v.b * 0.6, 1)
-		else
-			love.graphics.setColor(v.r, v.g, v.b, 1)
-		end
-		if c.dying then
-			local seq = def and def.die and bms.load(def.die)
-			if seq then
-				local speed = def.die_speed or 1
-				local frame = math.min(seq.count, math.floor(c.die_t * 24 * speed) + 1)
-				bms.draw(seq, frame, c.x, c.y, c.rot or 0, v.scale)
-			end
-		else
-			local seq = def and def.move and bms.load(def.move)
-			if seq then
-				local speed = def.move_speed or 1
-				local frame = math.floor(c.anim_t * 24 * speed) + 1
-				local rot = c.fixed_rot -- dens/nests don't track the player
-					or math.atan2(game.player.y - c.y, game.player.x - c.x) + math.pi / 2
-				bms.draw(seq, frame, c.x, c.y, rot, v.scale)
-			else
-				love.graphics.circle("fill", c.x, c.y, 14 * v.scale)
-			end
-		end
+		local fade = c.dying
+			and math.max(0, 1 - (c.die_t or 0) / SHADOW_FADE)
+			or 1
+		draw_shadow(c.def, c.x, c.y, c.variant.scale, fade)
+	end
+	if game.player.hp > 0 then
+		draw_shadow(data.creatures.TROOPER, game.player.x, game.player.y, 1)
+	end
+
+	-- body parts still in the air from a kill, under the living
+	gibs.draw()
+
+	for _, c in ipairs(game.creatures) do
+		draw_creature(game, c)
 	end
 
 	-- player
@@ -1701,28 +1851,59 @@ function game.draw()
 		end
 	end
 
-	-- bullets (flame projectiles and fire-bullet rounds draw as fireballs)
+	-- bullets: the sprite its weapon's family calls for. Fire and flame keep
+	-- flickering because the flame IS the flicker; the rest are steady art.
+	local bullet_img = assets.image("game/bullet16.tga")
+	local trail_img = assets.image("game/bulletTrail.tga")
 	for _, b in ipairs(game.bullets) do
+		local rot = math.atan2(b.dy, b.dx)
 		if b.flame or b.fire then
-			love.graphics.setBlendMode("add")
-			love.graphics.setColor(1, 0.55, 0.15, 0.8)
-			love.graphics.circle("fill", b.x, b.y,
-				(b.flame and 5 or 3) + love.math.random() * 2)
-			love.graphics.setBlendMode("alpha")
+			draw_proj("glow", b.x, b.y, rot, (b.flame and 0.6 or 0.4)
+				+ love.math.random() * 0.12, 1, 0.55, 0.15, 0.85, true)
+		elseif b.art == "rocket" then
+			-- the sprite is painted nose-up, so it needs a quarter turn to fly
+			draw_proj("rocket", b.x, b.y, rot + math.pi / 2, 1, 1, 1, 1, 1, false)
+		elseif b.art == "blade" then
+			-- a thrown blade spins on its own axis, not along its path
+			draw_proj("blade", b.x, b.y, game.time * 16, 1, 1, 1, 1, 1, false)
+		elseif b.art == "plasma" then
+			draw_proj("glow", b.x, b.y, rot, 0.55, 0.55, 0.8, 1, 0.9, true)
+		elseif b.art == "ion" then
+			draw_proj("glow", b.x, b.y, rot, 0.5, 0.6, 1, 0.65, 0.9, true)
+		elseif b.art == "pulse" then
+			draw_proj("glow", b.x, b.y, rot, 0.75, 1, 0.9, 0.5, 0.9, true)
+		elseif bullet_img then
+			-- kinetic: the trail is drawn from its own right edge, so it lies
+			-- behind the round along the way it came
+			if trail_img then
+				love.graphics.setBlendMode("add")
+				love.graphics.setColor(1, 0.9, 0.6, 0.3)
+				love.graphics.draw(trail_img, b.x, b.y, rot,
+					BULLET_TRAIL / trail_img:getWidth(), 3 / trail_img:getHeight(),
+					trail_img:getWidth(), trail_img:getHeight() / 2)
+				love.graphics.setBlendMode("alpha")
+			end
+			love.graphics.setColor(1, 1, 1, 1)
+			love.graphics.draw(bullet_img, b.x, b.y, rot + math.pi / 2, 0.6, 0.6,
+				bullet_img:getWidth() / 2, bullet_img:getHeight() / 2)
 		else
 			love.graphics.setColor(1, 1, 0.6, 1)
 			love.graphics.circle("fill", b.x, b.y, 2.5)
 		end
 	end
 
-	-- creature plasma bolts (green, additive glow)
-	love.graphics.setBlendMode("add")
+	-- creature plasma bolts: the same glow the player's energy weapons use,
+	-- in the green that says "this one is coming at you"
 	for _, b in ipairs(game.ebullets) do
-		love.graphics.setColor(0.3, 1, 0.4, 0.9)
-		love.graphics.circle("fill", b.x, b.y, 4 + love.math.random() * 1.5)
+		if not draw_proj("glow", b.x, b.y, 0, 0.5, 0.3, 1, 0.4, 0.9, true) then
+			love.graphics.setBlendMode("add")
+			love.graphics.setColor(0.3, 1, 0.4, 0.9)
+			love.graphics.circle("fill", b.x, b.y, 4 + love.math.random() * 1.5)
+			love.graphics.setBlendMode("alpha")
+		end
 	end
-	love.graphics.setBlendMode("alpha")
 
+	hud.draw_shield(game, game.player.x, game.player.y)
 	hud.draw_levelup_ring(game, game.player.x, game.player.y)
 	-- inside the camera transform: brass, blood, fire and smoke on the ground
 	fx.draw("world")

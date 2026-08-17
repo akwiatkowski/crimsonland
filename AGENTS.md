@@ -131,7 +131,17 @@ NX_SetCursor NX_GetInterface NX_GetTime NX_FileExists NX_Popup NX_CallExtension`
   any UI screen overlays GameCrimsonland
 - `perks.lua` — clean-room classic perk set as game.mods multipliers;
   PickAPerk comps are filled from the game layer (C++ did this originally)
-- `particles.lua` — hand-rolled FX layer (NOT the fxs/ DSL — still open)
+- `particles.lua` — names which effect belongs to which moment; the effects
+  themselves are authored in the pak's own `fxs/` DSL under `mods/vanilla/fxs/`
+  and run by `src/engine/fx.lua`
+- `gibs.lua` — body parts from `bm_gibs_unique`/`bm_gibs_common` (four parts
+  per sheet, not an animation); thrown on a kill, baked into the terrain
+  canvas where they stop, like the corpse
+- Playfield art notes: `bm_shadow` draws under everything alive (faded out
+  over a death); `game/projs.tga` holds four projectile sprites, assigned by
+  weapons.xml's own `type`/`flags` in `data.lua`; the `*-stencil.bms` pairs
+  are parsed but deliberately unused — read `draw_creature`'s comment before
+  wiring them to the variant colour, it has been tried
 - `hud.lua` — in-game HUD from the original 2014 art (game/health_pie_*,
   aim_circle/dot crosshair with reload sweep, progress-bar XP strip,
   levelup-ring, white-vignette low-hp breathing); bone/blood/brass/toxic

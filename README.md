@@ -74,6 +74,12 @@ Done:
 - [x] The whole shipped music set, per quest and per endless run
 - [x] Galleries show only what you have met: locked plates until first sight,
       and a discovered count
+- [x] The playfield art the pak ships and nothing was drawing: shadows under
+      everything alive (`bm_shadow`), body parts thrown by a kill and baked
+      where they land (`bm_gibs_unique`/`_common`), projectile sprites off
+      `game/projs.tga` picked by each weapon's own `type`/`flags`, the ice
+      block on a frozen creature and the fragments it sheds, and the shield
+      ring while the powerup runs
 
 Next:
 

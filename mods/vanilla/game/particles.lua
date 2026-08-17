@@ -47,6 +47,12 @@ function particles.sparkle(x, y)
 	spawn("mods/vanilla/fxs/pickup.lua", x, y)
 end
 
+--- The ice coming off a creature that thaws or dies still frozen; `scale`
+-- sizes it to whatever was encased.
+function particles.ice_shatter(x, y, scale)
+	spawn("mods/vanilla/fxs/ice-shatter.lua", x, y, 0, scale or 1)
+end
+
 -- No update, draw or clear here any more: the engine updates both fx layers
 -- every frame, the game already draws the world one inside its camera, and
 -- fx.clear("world") already wipes the field between runs.

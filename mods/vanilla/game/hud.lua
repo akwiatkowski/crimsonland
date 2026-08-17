@@ -274,6 +274,29 @@ function hud.draw_levelup_ring(game, px, py)
 	love.graphics.setColor(1, 1, 1, 1)
 end
 
+--- Shield bubble: the ring the pak ships as game/shield_pie.png, turning
+-- slowly around the player while SHIELD runs. World coords, so play.lua
+-- draws it inside the camera transform like the level-up ring.
+function hud.draw_shield(game, px, py)
+	local left = game.effects.SHIELD
+	if not left then return end
+	local ring = assets.image("game/shield_pie.png")
+	if not ring then return end
+	-- steady while it holds, flickering through the last second so the loss
+	-- is seen coming rather than noticed by being bitten
+	local a = (left < 1) and (0.35 + 0.45 * math.abs(math.sin(game.time * 18))) or 0.85
+	-- the ring art is 55px and the trooper about 40 of his 64px frame, so it
+	-- has to be scaled well past both to read as a barrier around him rather
+	-- than a belt he is wearing
+	local s = (92 / ring:getWidth()) * (1 + 0.04 * math.sin(game.time * 4))
+	love.graphics.setBlendMode("add")
+	love.graphics.setColor(1, 1, 1, a)
+	love.graphics.draw(ring, px, py, game.time * 0.5, s, s,
+		ring:getWidth() / 2, ring:getHeight() / 2)
+	love.graphics.setBlendMode("alpha")
+	love.graphics.setColor(1, 1, 1, 1)
+end
+
 -- ------------------------------------------------------------------ main
 
 --- Screen-space HUD; call after the camera transform is popped.

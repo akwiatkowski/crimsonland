@@ -22,6 +22,27 @@ end
 data.weapons = {} -- id -> table
 data.weapon_order = {} -- by numeric index
 
+-- Which sprite off game/projs.tga a weapon's rounds are drawn with.
+--
+-- weapons.xml carries the answer in two attributes nothing else in this port
+-- reads yet. `type` separates the projectile families cleanly across all 38
+-- entries -- 0 kinetic, 1 flame, 2 rocket, 3 pulse, 4 ion -- and bit 16 of
+-- `flags` is set on exactly the plasma weapons (plus the shrinkifier and the
+-- spider's spit, which fire the same energy blob). The blade gun is the one
+-- weapon nothing in the XML distinguishes, so it goes by id: the sheet has a
+-- spinning blade on it and only one weapon throws blades.
+local PLASMA_FLAG = 16
+
+local function projectile_art(id, wtype, flags)
+	if id == "BLADE_GUN" then return "blade" end
+	if wtype == 1 then return "flame" end
+	if wtype == 2 then return "rocket" end
+	if wtype == 3 then return "pulse" end
+	if wtype == 4 then return "ion" end
+	if math.floor(flags / PLASMA_FLAG) % 2 == 1 then return "plasma" end
+	return "bullet"
+end
+
 function data.load_weapons()
 	local root = read_xml("weapons/weapons.xml")
 	local arr = xml.array(root, "WEAPONS")
@@ -57,6 +78,7 @@ function data.load_weapons()
 			w.damage_effective = 19.2 * w.stat_damage * w.shoot_interval
 				/ math.max(1, w.num_projectiles)
 		end
+		w.proj_art = projectile_art(w.id, to_num(a.type, 0), to_num(a.flags, 0))
 		data.weapons[w.id] = w
 		data.weapon_order[w.index] = w
 	end
@@ -78,6 +100,16 @@ function data.load_creatures()
 				elseif k == "bm_move_legs" then c.move_legs = v
 				elseif k == "bm_die" then c.die = v
 				elseif k == "bm_shadow" then c.shadow = v
+				-- A stencil is a second .bms over the same frames with only a
+				-- small region opaque, in grey. Nothing draws them yet: the
+				-- obvious reading (mask for the variant colour) was tried and
+				-- looks worse than tinting the whole sprite -- see the note on
+				-- play.lua's draw_creature. The gib sheets are four separate
+				-- body parts each, not an animation.
+				elseif k == "bm_move_stencil" then c.move_stencil = v
+				elseif k == "bm_die_stencil" then c.die_stencil = v
+				elseif k == "bm_gibs_unique" then c.gibs_unique = v
+				elseif k == "bm_gibs_common" then c.gibs_common = v
 				elseif k == "move_animation_playback_speed" then c.move_speed = to_num(v, 1)
 				elseif k == "die_animation_playback_speed" then c.die_speed = to_num(v, 1)
 				elseif k and k:match("^snd_") then c.sounds[k] = v

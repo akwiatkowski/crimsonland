@@ -63,10 +63,23 @@ Done:
       platform-specific buttons stop showing up
 - [x] Mod architecture phase 2: the game lives entirely in `mods/vanilla/`
 
+- [x] The full 55-perk roster, with the original's own names and descriptions
+      read out of `prog.dll` (the pak ships only numbered icons)
+- [x] Custom Quests — the authored-quest format from `custom-quests/`, with
+      the play-menu button the pak has a handler for and no layout
+- [x] Gameplay effects (blood, gore, explosions, pickups) authored in the
+      original's `fxs/` DSL against `game/particles.tga`, replacing a second
+      hand-rolled particle system
+- [x] `Emitter` and `Editbox` comps — the last two comp types the pak uses
+- [x] The whole shipped music set, per quest and per endless run
+- [x] Galleries show only what you have met: locked plates until first sight,
+      and a discovered count
+
 Next:
 
-- [ ] Custom Quests: the format is documented in the pak's own sample set
 - [ ] Gamepad support (`joystick` is enabled but unused)
+- [ ] `ai-player.xml` — shipped UI-navigation hints for the attract-mode and
+      autotest AI, currently hand-written
 
 ## Rebuilding from scratch
 
@@ -81,7 +94,13 @@ make test      # scripted autotest (SCENARIO=quest-smoke): ASCII captures to
 
 Scenarios: `quest-smoke`, `quest-fast`, `combat-smoke` (an AI plays, so
 weapons/hits/drops are exercised), `survival-smoke`, `rush-smoke`,
-`menus-smoke` (galleries + statistics), `options-smoke`, `fx-smoke`.
+`menus-smoke` (galleries + statistics), `options-smoke`, `fx-smoke`,
+`emitter-smoke`, `editbox-smoke`, `perks-smoke`, `custom-smoke`.
+
+Scenarios run on a fixed 1/60 clock as fast as the machine manages, not on
+real time — a minimized LÖVE window is App-Nap throttled on macOS, which used
+to make a 65-second scenario take minutes and look like a hang. They are also
+reproducible: `love.math` is seeded, so two runs agree exactly.
 
 In-game controls: WASD/arrows move, mouse aims, LMB fires, R reloads,
 Escape aborts the quest back to the menu.
@@ -92,7 +111,7 @@ Escape aborts the quest back to the menu.
 |-------------------------|----------------------------------------------------|
 | `main.lua`, `conf.lua`  | LÖVE entry point (game only)                       |
 | `src/engine/`           | Reimplemented 10tons engine runtime (screens, comps, NX_* API) |
-| `mods/vanilla/`         | The game as a mod: descriptor + `game/` (quests, creatures, weapons, UI screens) |
+| `mods/vanilla/`         | The game as a mod: descriptor, `game/` (quests, creatures, weapons, UI screens) and `fxs/` (the port's own particle effects) |
 | `src/test/`             | Autotest harness + scripted scenarios (loaded only with `--autotest`) |
 | `tools/`                | `extract_pak.py` — PAK V11 extractor               |
 | `vendor/`               | Original rar, installer, `extracted/`, `assets*/` (gitignored) |

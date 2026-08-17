@@ -51,11 +51,17 @@ Done:
 - [x] Original `fxs/` particle DSL interpreted (spent brass on the real
       emitter parameters; the pak ships no blood/explosion effect files)
 - [x] Quest and chapter unlock gating fed from the save data
+- [x] Attract mode: the menu sits on a live game played by an AI, as the
+      original's timeline intends
+- [x] High Scores + Statistics screens, lifetime stats and per-mode bests
+- [x] Weapon and perk galleries with hover details
+- [x] Options that apply and persist (volume sliders, windowed)
 
 Next:
 
-- [ ] HighScores / Statistics screens fed from the save data
+- [ ] Achievements: 23 defined in `achievements.xml` with art, none awarded
 - [ ] Mod arch phase 2: move `src/game/` into `mods/vanilla/`
+- [ ] Resolution picker (the display screen's `Listbox` comp is unimplemented)
 
 ## Rebuilding from scratch
 
@@ -64,8 +70,13 @@ brew install innoextract
 # put Crimsonland.2014.rar in vendor/
 make extract   # unpacks rar -> GOG installer -> paks -> vendor/assets*
 make run       # launches with LÖVE (expects ~/Applications/love.app)
-make test      # scripted autotest (SCENARIO=quest-smoke): ASCII captures to terminal
+make test      # scripted autotest (SCENARIO=quest-smoke): ASCII captures to
+               # the terminal plus PNG frames in LÖVE's save directory
 ```
+
+Scenarios: `quest-smoke`, `quest-fast`, `combat-smoke` (an AI plays, so
+weapons/hits/drops are exercised), `survival-smoke`, `rush-smoke`,
+`menus-smoke` (galleries + statistics), `options-smoke`, `fx-smoke`.
 
 In-game controls: WASD/arrows move, mouse aims, LMB fires, R reloads,
 Escape aborts the quest back to the menu.

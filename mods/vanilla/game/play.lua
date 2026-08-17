@@ -212,8 +212,8 @@ local function init_session(terrain_chapter)
 	game.perk_choices = nil
 	game.pending_perks = 0 -- extra picks queued by Instant Winner & friends
 	game.death_clock = nil -- seconds left once the Death Clock perk is taken
-	particles.clear()
-	fx.clear("world") -- brass from the previous run must not follow the player
+	-- brass, blood and smoke from the previous run must not follow the player
+	fx.clear("world")
 	game.score = 0
 	game.xp = 0
 	game.level = 1
@@ -1056,7 +1056,6 @@ function game.update(dt)
 		game.end_timer = game.end_timer - dt
 		-- let the gore finish, then hand over to the original end screens
 		update_creatures(game, dt)
-		particles.update(dt)
 		if game.end_timer <= 0 and not game.end_screen_pushed then
 			game.end_screen_pushed = true
 			game.open_end_screen()
@@ -1086,7 +1085,6 @@ function game.update(dt)
 	update_creatures(game, dt)
 	update_ebullets(game, dt)
 	update_drops(game, dt)
-	particles.update(dt)
 
 	-- boss entrance at 60% of the kill goal
 	if game.boss_pending > 0 and game.kills_goal
@@ -1340,8 +1338,8 @@ function game.draw()
 	love.graphics.setBlendMode("alpha")
 
 	hud.draw_levelup_ring(game, game.player.x, game.player.y)
-	particles.draw()
-	fx.draw("world") -- inside the camera transform: spent brass on the ground
+	-- inside the camera transform: brass, blood, fire and smoke on the ground
+	fx.draw("world")
 
 	love.graphics.pop()
 

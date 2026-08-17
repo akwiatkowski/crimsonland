@@ -23,9 +23,11 @@ local paths = require("src.engine.paths")
 local fx = {}
 
 local GRAPH_PARAMS = { scale_graph = true, alpha_graph = true }
--- The engine's own emitters are small (1-100 particles); the cap only exists so
--- a fast-firing weapon cannot grow the pool without bound.
-local MAX_PARTICLES = 600
+-- Per layer. The UI's own emitters are small (1-100 particles), but the world
+-- layer now carries the gameplay effects too — a swarm coming apart is a lot of
+-- blood on top of the brass — so the cap has room for a busy fight before it
+-- starts dropping bursts.
+local MAX_PARTICLES = 1500
 
 local cache = {}
 -- Two pools because the two callers live in different spaces: UI emitters are
@@ -35,16 +37,24 @@ local pools = { screen = {}, world = {} }
 
 -- ------------------------------------------------------------------ loading
 
+-- Values arrive as varargs rather than (a, b) because `bitmap_rect` needs four
+-- of them. Everything the pak's own files use still lands the same way: one
+-- number is a constant, two are a random range.
 local function param_setter(emitter)
-	return function(name, a, b)
+	return function(name, ...)
+		local n = select("#", ...)
+		local a = ...
 		if GRAPH_PARAMS[name] then
 			local graph = emitter[name] or {}
-			graph[#graph + 1] = { t = a or 0, v = b or 0 }
+			graph[#graph + 1] = { t = a or 0, v = (select(2, ...)) or 0 }
 			emitter[name] = graph
 		elseif type(a) == "string" then
 			emitter[name] = a
 		else
-			emitter[name] = { a or 0, b or a or 0 }
+			local vals = {}
+			for i = 1, math.max(n, 1) do vals[i] = (select(i, ...)) or 0 end
+			if n < 2 then vals[2] = vals[1] end -- one value = a zero-width range
+			emitter[name] = vals
 		end
 	end
 end
@@ -53,7 +63,11 @@ end
 function fx.load(path)
 	if cache[path] ~= nil then return cache[path] or nil end
 
-	local chunk = loadfile(paths.ASSETS .. "/" .. path)
+	-- A mod's own effects live in the mod, because the pak is read-only and
+	-- gitignored — so a path that resolves as-is wins over the assets root.
+	local file = love.filesystem.getInfo(path) and path
+		or (paths.ASSETS .. "/" .. path)
+	local chunk = loadfile(file)
 	if not chunk then
 		print(("[fx] cannot load %s"):format(path))
 		cache[path] = false
@@ -70,9 +84,11 @@ function fx.load(path)
 			current = #emitters
 		end,
 	}
-	-- PartFXParm always targets the emitter PartFXAddNew opened last
-	env.PartFXParm = function(name, a, b)
-		param_setter(emitters[current])(name, a, b)
+	-- PartFXParm always targets the emitter PartFXAddNew opened last. Forwards
+	-- varargs, not (a, b): truncating here silently gave every emitter past the
+	-- first a two-value bitmap_rect, hence a zero-size quad and nothing drawn.
+	env.PartFXParm = function(name, ...)
+		param_setter(emitters[current])(name, ...)
 	end
 	setfenv(chunk, env)
 
@@ -110,10 +126,22 @@ local function sample(graph, t, default)
 	return graph[#graph].v
 end
 
-local function emit(e, x, y, rot, pool, fade)
+local function emit(e, x, y, rot, pool, fade, base_scale)
 	local n = math.floor(rand_range(e.num_parts, 1))
 	local image = e.bitmap and assets.image(e.bitmap)
 	if not image then return end
+	base_scale = base_scale or 1
+
+	-- `bitmap_rect` (x, y, w, h in reference units) is this port's one addition
+	-- to the DSL. The pak's effect files each name a whole file because the
+	-- effects it shipped had one; the gameplay effects want game/particles.tga,
+	-- which is the 256x256 sheet the C++ side drew blood, fire and smoke from.
+	local quad, quad_scale, qw, qh
+	if e.bitmap_rect then
+		local r = e.bitmap_rect
+		quad, quad_scale = assets.quad(image, r[1] or 0, r[2] or 0, r[3] or 0, r[4] or 0)
+		qw, qh = select(3, quad:getViewport())
+	end
 
 	for _ = 1, n do
 		if #pool >= MAX_PARTICLES then return end
@@ -135,10 +163,15 @@ local function emit(e, x, y, rot, pool, fade)
 		local life = rand_range(e.age_to_die, 1)
 		local move = math.rad(rot + rand_range(e.move_angle, 0)
 			+ (love.math.random() - 0.5) * rand_range(e.move_angle_spread, 0))
-		local speed = rand_range(e.move_speed, rand_range(e.speed, 0))
+		local speed = rand_range(e.move_speed, rand_range(e.speed, 0)) * base_scale
 
 		pool[#pool + 1] = {
 			image = image,
+			quad = quad,
+			quad_scale = quad_scale,
+			quad_w = qw,
+			quad_h = qh,
+			base_scale = base_scale,
 			additive = e.blend_mode == "ADDITIVE",
 			x = px,
 			y = py,
@@ -172,13 +205,15 @@ end
 --           alpha_graph and mostly does, but shells1.lua holds alpha at 1 to
 --           the last frame and then simply stops existing — fine for the
 --           trooper scene it was written for, visible litter in gameplay.
+--   scale = size and throw multiplier, for one effect serving several sizes
+--           (a rocket blast and a bursting creature are the same explosion)
 function fx.spawn(path, x, y, rot, opts)
 	local emitters = fx.load(path)
 	if not emitters then return end
 	opts = opts or {}
 	local pool = pools[opts.layer or "screen"]
 	for _, e in ipairs(emitters) do
-		emit(e, x, y, rot or 0, pool, opts.fade)
+		emit(e, x, y, rot or 0, pool, opts.fade, opts.scale)
 	end
 end
 
@@ -207,13 +242,20 @@ end
 function fx.draw(layer)
 	for _, p in ipairs(pools[layer or "screen"]) do
 		local t = p.age / p.life
-		local scale = sample(p.scale_graph, t, 1)
+		local scale = sample(p.scale_graph, t, 1) * p.base_scale
 		local alpha = p.alpha * sample(p.alpha_graph, t, 1)
 		if p.fade and t > 1 - p.fade then alpha = alpha * (1 - t) / p.fade end
 		love.graphics.setBlendMode(p.additive and "add" or "alpha")
 		love.graphics.setColor(1, 1, 1, alpha)
-		love.graphics.draw(p.image, p.x, p.y, p.angle, scale, scale,
-			p.image:getWidth() / 2, p.image:getHeight() / 2)
+		if p.quad then
+			-- a quad addresses texels, so its origin and scale are in texels too
+			local s = scale * p.quad_scale
+			love.graphics.draw(p.image, p.quad, p.x, p.y, p.angle, s, s,
+				p.quad_w / 2, p.quad_h / 2)
+		else
+			love.graphics.draw(p.image, p.x, p.y, p.angle, scale, scale,
+				p.image:getWidth() / 2, p.image:getHeight() / 2)
+		end
 	end
 	love.graphics.setBlendMode("alpha")
 	love.graphics.setColor(1, 1, 1, 1)

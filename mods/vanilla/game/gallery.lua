@@ -7,8 +7,9 @@
 --
 -- The plates ship in their locked state: most carry ui/gfx/lock-small.png,
 -- which the C++ side swapped for the real icon as the player unlocked things.
--- This port has no per-weapon unlock — guns arrive as drops, gated by chapter
--- through game.weapon_cap — so the grid is filled in as a reference instead.
+-- The save records first sight of every weapon and perk (game/unlocks.lua, for
+-- the celebration screens), so the grid can work that way here too: a plate is
+-- its own art once you have met the thing, and the shipped lock until then.
 -- Slot index lines up with weapons.xml order exactly (verified against every
 -- plate the layout does declare).
 
@@ -16,6 +17,7 @@ local comps = require("src.engine.comps")
 local data = require("mods.vanilla.game.data")
 local font = require("src.engine.font")
 local perks = require("mods.vanilla.game.perks")
+local save = require("mods.vanilla.game.save")
 
 local gallery = {}
 
@@ -42,23 +44,64 @@ function gallery.slot_index(comp, prefix)
 	return n and tonumber(n) or nil
 end
 
---- Put every slot's real art on it, and dim the ones this port cannot serve
--- (the original ships 56 perks; the roster in perks.lua implements 25). Dimmed
--- rather than hidden: a hole in the original's grid would read as a bug.
+local LOCK_ICON = "ui/gfx/lock-small.png"
+
+--- Has this profile met `entry` yet? First sight is recorded when a weapon is
+-- picked up or a perk taken, in any mode (game/unlocks.lua).
+function gallery.seen(kind, entry)
+	if not entry or entry.id == nil then return false end
+	local set = save.game.seen[kind == "weapon" and "weapons" or "perks"]
+	return set ~= nil and set[entry.id] == true
+end
+
+--- Put every slot into one of three states:
+--   seen           its own art, and full details on hover
+--   undiscovered   the lock the plate ships with, and no details
+--   unimplemented  dimmed (the original has 56 perks; perks.lua implements 25)
+--
+-- Dimmed rather than hidden, because a hole in the original's grid would read
+-- as a bug — and distinct from the lock, because "you have not found this yet"
+-- and "this port cannot serve this" are different promises to the player.
 function gallery.fill(screen, prefix, kind)
 	for _, comp in ipairs(screen.comps) do
 		local i = gallery.slot_index(comp, prefix)
 		if i then
 			local entry = gallery.entry_at(kind, i)
-			if entry and entry.icon then
-				comps.set(comp, "button.bm_icon", { entry.icon })
-			else
+			if not (entry and entry.icon) then
 				for _, s in ipairs({ "idle", "over", "pressed" }) do
 					comps.set(comp, "button.bitmap_color_" .. s, UNIMPLEMENTED)
 				end
+			elseif gallery.seen(kind, entry) then
+				comps.set(comp, "button.bm_icon", { entry.icon })
+			else
+				-- set it rather than trust the layout: a few plates ship
+				-- carrying their real icon already
+				comps.set(comp, "button.bm_icon", { LOCK_ICON })
 			end
 		end
 	end
+end
+
+--- "12 / 30 discovered", under the grid. The layouts have no textbox for it —
+-- the C++ side drew the whole panel — so it goes on with the panel's own font.
+local function draw_progress(screen, prefix, kind)
+	local panel = screen.compmap["panel"]
+	if not panel then return end
+	local seen, total = 0, 0
+	for _, comp in ipairs(screen.comps) do
+		local i = gallery.slot_index(comp, prefix)
+		local entry = i and gallery.entry_at(kind, i)
+		if entry and entry.icon then
+			total = total + 1
+			if gallery.seen(kind, entry) then seen = seen + 1 end
+		end
+	end
+	if total == 0 then return end
+	local text = ("%d / %d discovered"):format(seen, total)
+	local px, py, pw, ph = comps.screen_rect(panel)
+	-- clear of the frame's bottom bar, which the panel rect includes
+	font.draw(F_SMALL, text, px + (pw - font.measure(F_SMALL, text)) / 2,
+		py + ph - 52, DIM)
 end
 
 function gallery.prepare(screen_name, screen)
@@ -118,29 +161,47 @@ local function tooltip(screen, hovered, title, detail, title_color)
 	end
 end
 
-function gallery.draw(screen_name, screen)
-	local hover = screen._hover_comp
-	if not hover then return end
+-- ASCII only: the .mft faces are LATIN-1, so a UTF-8 dash arrives as its
+-- first byte and draws as a stray accented letter.
+local UNDISCOVERED = {
+	weapon = "Undiscovered. Weapons are found in the field - pick this one up "
+		.. "and it takes its place here.",
+	perk = "Undiscovered. Take this perk on a level-up and it takes its place "
+		.. "here.",
+}
 
+function gallery.draw(screen_name, screen)
+	local prefix, kind
 	if screen_name == "Weapons" then
-		local i = gallery.slot_index(hover, "Weapon")
-		local w = i and gallery.entry_at("weapon", i)
-		if not w then return end
-		tooltip(screen, hover, w.name or "?",
-			("Damage %.0f, clip %d, %.1f shots/sec, %.1fs reload."):format(
-				w.damage_effective or 0, w.clip_size or 0,
-				w.shoot_interval > 0 and 1 / w.shoot_interval or 0,
-				w.reload_time or 0), BRASS)
+		prefix, kind = "Weapon", "weapon"
 	elseif screen_name == "Perks" then
-		local i = gallery.slot_index(hover, "Perk")
-		if not i then return end
-		local p = gallery.entry_at("perk", i)
-		if p then
-			tooltip(screen, hover, p.name, p.desc or "", BRASS)
-		else
+		prefix, kind = "Perk", "perk"
+	else
+		return
+	end
+	draw_progress(screen, prefix, kind)
+
+	local hover = screen._hover_comp
+	local i = hover and gallery.slot_index(hover, prefix)
+	if not i then return end
+	local entry = gallery.entry_at(kind, i)
+
+	if not (entry and entry.icon) then
+		if kind == "perk" then
 			tooltip(screen, hover, "Not in this port yet",
 				"The original ships 56 perks; this port implements 25.", DIM)
 		end
+	elseif not gallery.seen(kind, entry) then
+		-- the name is the reward for finding it, so it stays hidden too
+		tooltip(screen, hover, "???", UNDISCOVERED[kind], DIM)
+	elseif kind == "weapon" then
+		tooltip(screen, hover, entry.name or "?",
+			("Damage %.0f, clip %d, %.1f shots/sec, %.1fs reload."):format(
+				entry.damage_effective or 0, entry.clip_size or 0,
+				entry.shoot_interval > 0 and 1 / entry.shoot_interval or 0,
+				entry.reload_time or 0), BRASS)
+	else
+		tooltip(screen, hover, entry.name, entry.desc or "", BRASS)
 	end
 end
 

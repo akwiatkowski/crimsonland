@@ -9,6 +9,7 @@ local bms = require("src.game.bms")
 local data = require("src.game.data")
 local fx = require("src.engine.fx")
 local hud = require("src.game.hud")
+local input = require("src.game.input")
 local particles = require("src.game.particles")
 local perks = require("src.game.perks")
 local quests = require("src.game.quests")
@@ -18,6 +19,7 @@ local game = {}
 game.active = false
 
 local WORLD = 2048 -- world size in pixels (square)
+game.WORLD = WORLD -- anything steering the player needs the bounds too
 local SCREEN_W, SCREEN_H = 960, 640
 
 -- unit conversions (original engine units -> pixels; tuned by feel —
@@ -508,11 +510,8 @@ end
 
 local function update_player(game, dt)
 	local p = game.player
-	local dx, dy = 0, 0
-	if love.keyboard.isDown("w") or love.keyboard.isDown("up") then dy = dy - 1 end
-	if love.keyboard.isDown("s") or love.keyboard.isDown("down") then dy = dy + 1 end
-	if love.keyboard.isDown("a") or love.keyboard.isDown("left") then dx = dx - 1 end
-	if love.keyboard.isDown("d") or love.keyboard.isDown("right") then dx = dx + 1 end
+	local want = input.intent(game)
+	local dx, dy = want.dx, want.dy
 	p.moving = (dx ~= 0 or dy ~= 0)
 	if p.moving then
 		local len = math.sqrt(dx * dx + dy * dy)
@@ -523,12 +522,10 @@ local function update_player(game, dt)
 		p.anim_t = p.anim_t + dt
 	end
 
-	-- aim at mouse (world coords)
-	local mx, my = love.mouse.getPosition()
-	local engine = require("src.engine")
-	local rx, ry = engine.to_reference(mx, my)
-	local camx, camy = game.camera()
-	p.angle = math.atan2(ry + camy - p.y, rx + camx - p.x)
+	-- aim point is world-space, so the HUD crosshair can follow whoever is
+	-- playing — mouse, AI demo or a test
+	p.aim_x, p.aim_y = want.aim_x, want.aim_y
+	p.angle = math.atan2(p.aim_y - p.y, p.aim_x - p.x)
 
 	-- weapon (nukefism plays unarmed)
 	if not p.weapon then return end
@@ -559,13 +556,13 @@ local function update_player(game, dt)
 				}
 			end
 		end
-	elseif love.keyboard.isDown("r") and p.ammo < game.clip_size() then
+	elseif want.reload and p.ammo < game.clip_size() then
 		p.reloading = p.weapon.reload_time * game.mods.reload
 		p.reload_total = p.reloading -- HUD sweeps the crosshair arc from this
 		audio.play_sound(p.weapon.snd_reload)
 	end
 
-	if love.mouse.isDown(1) and p.reloading <= 0 and p.cooldown <= 0 then
+	if want.fire and p.reloading <= 0 and p.cooldown <= 0 then
 		if p.ammo <= 0 then
 			p.reloading = p.weapon.reload_time * game.mods.reload
 			p.reload_total = p.reloading

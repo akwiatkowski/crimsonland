@@ -521,6 +521,7 @@ local function open_perk_screen(game)
 		if b then
 			if choices[i] then
 				comps.set(b, "button.text", { choices[i].name })
+				comps.set(b, "button.bm_icon", { choices[i].icon })
 				comps.set(b, "visible", { true })
 			else
 				comps.set(b, "visible", { false })
@@ -1366,11 +1367,13 @@ end
 -- painted from the save file.
 function game.on_screen_draw(screen_name, screen)
 	require("src.game.records").draw(screen_name, screen)
+	require("src.game.gallery").draw(screen_name, screen)
 end
 
 --- Screens the engine pushes carry no progress state of their own.
 function game.on_screen_enter(screen_name, screen)
 	require("src.game.records").prepare(screen_name, screen)
+	require("src.game.gallery").prepare(screen_name, screen)
 	if screen_name == "MainMenu" then
 		-- reaching the menu with nothing running means attract mode
 		if not game.active then game.start_demo() end
@@ -1383,6 +1386,15 @@ end
 
 -- called by the screen manager after a screen's own OnClick
 function game.on_ui_click(screen_name, comp_name)
+	-- Back is a framework convention: several pak layouts ship the button and
+	-- no handler for it, because the C++ side popped the screen. Skip screens
+	-- whose own script already started leaving, or they would pop twice.
+	if comp_name == "Back" then
+		local screens = require("src.engine.screens")
+		local s = screens.find(screen_name)
+		if s and not s.leaving then screens.pop(screen_name) end
+		return true
+	end
 	if screen_name == "SelectChapter" then
 		local ch = comp_name:match("^Chapter_(%d+)$")
 		if ch then

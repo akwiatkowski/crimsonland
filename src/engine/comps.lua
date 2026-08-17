@@ -320,6 +320,17 @@ function comps.draw_button(comp, w, h, r, g, b, a)
 		love.graphics.pop()
 	end
 
+	-- button.bm_icon: art centered on the plate, used by the weapon and perk
+	-- galleries, PickAPerk, the unlock screens and the Extras menu. Icons that
+	-- outgrow their plate are scaled down; smaller ones are left alone.
+	local icon = assets.image(p["button.bm_icon"])
+	if icon then
+		local iw, ih = icon:getWidth(), icon:getHeight()
+		local fit = math.min(1, (w - 6) / iw, (h - 6) / ih)
+		love.graphics.setColor(r, g, b, a)
+		love.graphics.draw(icon, cx, cy, 0, fit, fit, iw / 2, ih / 2)
+	end
+
 	local text = p["button.text"]
 	if text ~= nil and text ~= "" then
 		text = tostring(text)

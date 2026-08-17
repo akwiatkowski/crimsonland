@@ -606,7 +606,8 @@ local function update_player(game, dt)
 			audio.play_sound(p.weapon.snd_fire, 1, 0, 1 + (love.math.random() - 0.5) / 6)
 			-- brass, on the original's own emitter parameters and shell art
 			fx.spawn("fxs/shells1.lua", p.x + math.cos(p.angle) * 14,
-				p.y + math.sin(p.angle) * 14, math.deg(p.angle), "world")
+				p.y + math.sin(p.angle) * 14, math.deg(p.angle),
+				{ layer = "world", fade = 0.25 })
 			local w = p.weapon
 			game.shots = game.shots + 1
 			-- flame weapons are short-ranged sprays; everything else uses

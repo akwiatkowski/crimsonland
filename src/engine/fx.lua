@@ -110,7 +110,7 @@ local function sample(graph, t, default)
 	return graph[#graph].v
 end
 
-local function emit(e, x, y, rot, pool)
+local function emit(e, x, y, rot, pool, fade)
 	local n = math.floor(rand_range(e.num_parts, 1))
 	local image = e.bitmap and assets.image(e.bitmap)
 	if not image then return end
@@ -155,6 +155,7 @@ local function emit(e, x, y, rot, pool)
 			age = rand_range(e.age, 0),
 			life = life,
 			alpha = rand_range(e.alpha, 1),
+			fade = fade,
 			scale_graph = e.scale_graph,
 			alpha_graph = e.alpha_graph,
 		}
@@ -163,15 +164,21 @@ local function emit(e, x, y, rot, pool)
 	if e.sound then audio.play_sound(e.sound) end
 end
 
---- Play `path` at x,y in `layer` ("screen" or "world"). `rot` (degrees) turns
--- the whole effect, so a gameplay caller can eject shells along whatever way
--- the player happens to face.
-function fx.spawn(path, x, y, rot, layer)
+--- Play `path` at x,y. `rot` (degrees) turns the whole effect, so a gameplay
+-- caller can eject shells along whatever way the player happens to face.
+-- opts:
+--   layer = "screen" (default) | "world"
+--   fade  = fraction of life spent fading out. The DSL can author that in
+--           alpha_graph and mostly does, but shells1.lua holds alpha at 1 to
+--           the last frame and then simply stops existing — fine for the
+--           trooper scene it was written for, visible litter in gameplay.
+function fx.spawn(path, x, y, rot, opts)
 	local emitters = fx.load(path)
 	if not emitters then return end
-	local pool = pools[layer or "screen"]
+	opts = opts or {}
+	local pool = pools[opts.layer or "screen"]
 	for _, e in ipairs(emitters) do
-		emit(e, x, y, rot or 0, pool)
+		emit(e, x, y, rot or 0, pool, opts.fade)
 	end
 end
 
@@ -202,6 +209,7 @@ function fx.draw(layer)
 		local t = p.age / p.life
 		local scale = sample(p.scale_graph, t, 1)
 		local alpha = p.alpha * sample(p.alpha_graph, t, 1)
+		if p.fade and t > 1 - p.fade then alpha = alpha * (1 - t) / p.fade end
 		love.graphics.setBlendMode(p.additive and "add" or "alpha")
 		love.graphics.setColor(1, 1, 1, alpha)
 		love.graphics.draw(p.image, p.x, p.y, p.angle, scale, scale,

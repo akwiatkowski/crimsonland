@@ -5,16 +5,30 @@
 
 local platform = {}
 
+-- What this build is. The layouts gate their contents on these through
+-- `required_features` (see screens.load), so the list decides which of the
+-- original's platform variations show up: a desktop copy with display and
+-- control options, no store, no console services, and none of the modes or
+-- game types this port has not implemented.
 local FEATURES = {
 	ACHIEVEMENTS = true,
 	LEADERBOARDS = true,
 	WINDOWED_TOGGLE = true,
+	DISPLAY_OPTIONS = true,
+	PC_CONTROLS = true,
 	EXIT_DIALOG_ON_ESC = true,
 	NO_TRIAL_TEXTS = true, -- full version: no trial nag texts
 	SHOWLOGO = true,
+	SINGLE_PROFILE = true, -- one local profile; no profile picker
+	NO_COOP = true, -- no second trooper, so co-op controls stay hidden
+	HIDE_HIGHSCORES_FILTER_BUTTON = true, -- local scores only: nothing to filter
 	-- explicitly absent: ADS, MOREGAMES, ANNOUNCEMENTS, ACCOUNT_MANAGEMENT,
 	-- VIRTUAL_CONTROLS, EXTERNAL_HELP, TROPHIES, AUTOMATIC_PROFILE_NAMING,
-	-- NO_FORCE_FEEDBACK, ADDITIONAL_CONTENT_JUNE_2015
+	-- NO_FORCE_FEEDBACK, ADDITIONAL_CONTENT_JUNE_2015, DEVELOPER_MODE,
+	-- RESTORE_PURCHASES_BUTTON, GAME_CENTER, GOOGLE_PLAY_GAMES,
+	-- PS4_CONTROLS, PS_VITA_CONTROLS, LEADERBOARDS_SELECTOR,
+	-- SHOW_SEPARATE_GLOBAL_HIGHSCORES, HIGHSCORES_DETAILS_BUTTON,
+	-- TYPOSHOOTER (the typing mode is not implemented)
 }
 
 function platform.feature_exists(name)

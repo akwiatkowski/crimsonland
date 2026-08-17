@@ -181,6 +181,10 @@ function comps.area(comp)
 		local img = assets.image(p["slider.bm_panel"])
 		if img then return img:getWidth(), img:getHeight() end
 		return 0, 0
+	elseif t == "Listbox" then
+		local img = assets.image(p["listbox.bm_frame"])
+		if img then return img:getWidth(), img:getHeight() end
+		return 0, 0
 	end
 	return 0, 0
 end
@@ -258,6 +262,8 @@ local function draw_self(comp, w, h)
 		comps.draw_checkbox(comp, w, h)
 	elseif t == "Slider" then
 		comps.draw_slider(comp, w, h)
+	elseif t == "Listbox" then
+		comps.draw_listbox(comp, w, h)
 	end
 	-- Marker/Aligner/Emitter/Path/Model/Scriptable/TouchGrid: nothing (yet)
 
@@ -399,6 +405,68 @@ function comps.draw_slider(comp, w, h)
 	end
 end
 
+--- Listbox: a framed column of rows with the selected one highlighted.
+--
+-- The DefaultListbox template carries everything the original drew it with
+-- (frame and selection art, font, paddings); what it has no property for is
+-- the contents, because the C++ side owned those. Whoever fills the list puts
+-- it in `listbox.items` (an array of strings) and reads `listbox.selected`.
+function comps.draw_listbox(comp, w, h)
+	local p = comp.props
+	local frame = assets.image(p["listbox.bm_frame"])
+	if frame then
+		love.graphics.setColor(1, 1, 1, 1)
+		love.graphics.draw(frame, 0, 0)
+	end
+
+	local items = p["listbox.items"]
+	if type(items) ~= "table" then return end
+
+	local pad_l = num(comp, "listbox.padding_left", 10)
+	local pad_t = num(comp, "listbox.padding_top", 10)
+	local fnt = p["listbox.font"]
+	local _, line_h = font.measure(fnt, "X")
+	local row_h = line_h + 6
+	local selection = assets.image(p["listbox.bm_selection"])
+	local selected = num(comp, "listbox.selected", 0)
+
+	local rows = math.floor((h - pad_t - num(comp, "listbox.padding_bottom", 10)) / row_h)
+	-- keep the selection in view without a scrollbar the original never drew
+	local first = 1
+	if selected > rows then first = selected - rows + 1 end
+
+	for i = 0, math.min(rows, #items - first) - 1 do
+		local index = first + i
+		local y = pad_t + i * row_h
+		if index == selected then
+			if selection then
+				love.graphics.setColor(1, 1, 1, 1)
+				love.graphics.draw(selection, 0, y - 3, 0,
+					w / selection:getWidth(), row_h / selection:getHeight())
+			end
+		end
+		font.draw(fnt, tostring(items[index]), pad_l, y,
+			index == selected and { 1, 1, 1, 1 } or { 0.72, 0.7, 0.66, 1 })
+	end
+end
+
+--- Row under a point in listbox-local coordinates, or nil.
+function comps.listbox_row(comp, lx, ly)
+	local p = comp.props
+	local items = p["listbox.items"]
+	if type(items) ~= "table" then return nil end
+	local pad_t = num(comp, "listbox.padding_top", 10)
+	local _, line_h = font.measure(p["listbox.font"], "X")
+	local row_h = line_h + 6
+	local index = math.floor((ly - pad_t) / row_h) + 1
+	local selected = num(comp, "listbox.selected", 0)
+	local _, h = comps.area(comp)
+	local rows = math.floor((h - pad_t - num(comp, "listbox.padding_bottom", 10)) / row_h)
+	if selected > rows then index = index + selected - rows end
+	if index < 1 or index > #items then return nil end
+	return index
+end
+
 -- draw comp + children, inside parent space of size pw x ph
 function comps.draw(comp, pw, ph, pax, pay)
 	if not comps.get(comp, "visible") then return end
@@ -458,7 +526,8 @@ function comps.screen_rect(comp)
 	return x, y, cw, ch
 end
 
-local CLICKABLE = { Button = true, Checkbox = true, Slider = true, Editbox = true }
+local CLICKABLE = { Button = true, Checkbox = true, Slider = true, Editbox = true,
+	Listbox = true }
 
 -- x,y in parent space; returns hit comp or nil
 function comps.hit(comp, pw, ph, x, y, pax, pay)

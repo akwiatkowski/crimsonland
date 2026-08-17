@@ -125,8 +125,12 @@ function harness.install(scenario_name)
 	love.update = function(dt)
 		if base_update then base_update(dt) end
 		elapsed = elapsed + dt
-		local step = scenario[step_idx]
-		if step and elapsed >= step.t then
+		-- every step whose time has passed, not one per frame: a long frame
+		-- (a terrain bake, a big asset load) otherwise pushes the rest of the
+		-- scenario out of step with the screens it expects
+		while true do
+			local step = scenario[step_idx]
+			if not (step and elapsed >= step.t) then break end
 			step_idx = step_idx + 1
 			if step.click then harness.click(step.click) end
 			if step.key then harness.key(step.key) end

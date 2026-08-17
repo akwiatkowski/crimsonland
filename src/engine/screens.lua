@@ -120,6 +120,25 @@ function screens.load(screen)
 		end
 	end
 	screens.loading = prev_loading
+	-- Layouts are written for every platform 10tons shipped on and gate the
+	-- parts that do not apply with `required_features` ("FEATURE" must be
+	-- present, "!FEATURE" must be absent, comma-separated). Without this the
+	-- Options screen stacks Display and Gameplay on the same spot, and dead
+	-- buttons for co-op, in-app purchases and console controls stay clickable.
+	local platform = require("src.engine.platform")
+	for _, c in ipairs(screen.comps) do
+		local req = c.props["required_features"]
+		if type(req) == "string" then
+			for token in req:gmatch("[^,%s]+") do
+				local negated = token:sub(1, 1) == "!"
+				local name = negated and token:sub(2) or token
+				if platform.feature_exists(name) == negated then
+					c.props.visible = false
+					break
+				end
+			end
+		end
+	end
 	-- resolve parent links now that all comps exist
 	for _, c in ipairs(screen.comps) do
 		if c.parent_name then
@@ -351,6 +370,11 @@ function screens.mousepressed(x, y, button)
 				if hit.type == "Checkbox" then
 					local v = hit.props["checkbox.value"]
 					hit.props["checkbox.value"] = not (v == true or v == 1)
+				elseif hit.type == "Listbox" then
+					-- rows are picked in the listbox's own space
+					local lx, ly = comps.screen_rect(hit)
+					local row = comps.listbox_row(hit, rx - lx, ry - ly)
+					if row then hit.props["listbox.selected"] = row end
 				elseif hit.type == "Slider" then
 					-- sliders are dragged, so remember which one until the
 					-- button comes back up (see screens.mousereleased)

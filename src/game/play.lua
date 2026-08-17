@@ -82,7 +82,23 @@ game.POWERUPS = POWERUPS -- the HUD reads icons/durations for effect timers
 
 -- ------------------------------------------------------------ terrain bake
 
+-- Baked terrain is expensive (a full-world canvas plus a tiling pass) and gets
+-- drawn into during play as gore accumulates. Bake each chapter's clean ground
+-- once, then copy it into the session's own canvas — attract mode restarts
+-- often enough that re-baking showed up as a visible hitch.
+local clean_terrain = {}
+
 local function bake_terrain(chapter_id)
+	if clean_terrain[chapter_id] then
+		local session = love.graphics.newCanvas(WORLD_W, WORLD_H)
+		love.graphics.setCanvas(session)
+		love.graphics.clear(0, 0, 0, 1)
+		love.graphics.setColor(1, 1, 1, 1)
+		love.graphics.draw(clean_terrain[chapter_id], 0, 0)
+		love.graphics.setCanvas()
+		return session
+	end
+
 	local ops = data.terrains[chapter_id] or data.terrains.CHAPTER_1
 	local rng = love.math.newRandomGenerator(12345)
 	local canvas = love.graphics.newCanvas(WORLD_W, WORLD_H)
@@ -128,7 +144,9 @@ local function bake_terrain(chapter_id)
 	end
 	love.graphics.setColor(1, 1, 1, 1)
 	love.graphics.setCanvas()
-	return canvas
+	clean_terrain[chapter_id] = canvas
+	-- the caller draws gore into what it gets back, so hand out a copy
+	return bake_terrain(chapter_id)
 end
 
 -- ------------------------------------------------------------ quest setup
@@ -1400,6 +1418,7 @@ function game.on_screen_enter(screen_name, screen)
 	require("src.game.gallery").prepare(screen_name, screen)
 	require("src.game.unlocks").prepare(screen_name, screen)
 	require("src.game.achievements").prepare(screen_name, screen)
+	require("src.game.display").prepare(screen_name, screen)
 	if screen_name == "MainMenu" then
 		-- reaching the menu with nothing running means attract mode
 		if not game.active then game.start_demo() end
@@ -1417,6 +1436,8 @@ function game.on_ui_click(screen_name, comp_name)
 	-- whose own script already started leaving, or they would pop twice.
 	-- the unlock celebrations have no button on them at all: any click closes
 	if require("src.game.unlocks").on_click(screen_name) then return true end
+	if require("src.game.display").on_click(screen_name, comp_name,
+		require("src.engine.screens").find(screen_name)) then return true end
 
 	if comp_name == "Back" then
 		local screens = require("src.engine.screens")
@@ -1558,5 +1579,10 @@ function game.to_main_menu()
 end
 
 function game.selected_chapter() return selected_chapter end
+
+--- The engine asks for this when a settings screen applies something.
+function game.save_settings()
+	require("src.game.save").flush()
+end
 
 return game

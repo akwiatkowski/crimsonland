@@ -699,7 +699,16 @@ function engine.start()
 		-- apply whatever the options screens stored last run
 		audio.sound_volume = platform.settings.sound_volume
 		audio.set_music_volume(platform.settings.music_volume)
-		if not platform.settings.windowed then love.window.setFullscreen(true) end
+		local set = platform.settings
+		if set.width and set.height then
+			love.window.setMode(set.width, set.height, {
+				resizable = true, fullscreen = not set.windowed,
+				vsync = 1, msaa = 4, highdpi = true,
+			})
+			compute_viewport()
+		elseif not set.windowed then
+			love.window.setFullscreen(true)
+		end
 		load_templates()
 		load_autoexec()
 		register_internal_screens()

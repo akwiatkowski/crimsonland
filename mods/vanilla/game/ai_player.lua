@@ -40,11 +40,11 @@ local function lead(target, px, py)
 	return target.x + dx / len * ahead, target.y + dy / len * ahead
 end
 
---- Build a controller for `game`. Returns function(game) -> intent.
+--- Build a controller for `game`. Returns function(game, dt) -> intent.
 function ai.controller()
 	local jitter_t, jitter_x, jitter_y = 0, 0, 0
 
-	return function(game)
+	return function(game, dt)
 		local p = game.player
 
 		local target, dist = nearest(game.creatures, p.x, p.y, ENGAGE)
@@ -52,7 +52,7 @@ function ai.controller()
 
 		-- aim: at the lead point of the current target, with a slow wander so
 		-- the crosshair drifts like a hand rather than snapping
-		jitter_t = jitter_t - love.timer.getDelta()
+		jitter_t = jitter_t - (dt or 0)
 		if jitter_t <= 0 then
 			jitter_t = 0.25 + love.math.random() * 0.35
 			jitter_x = (love.math.random() - 0.5) * 26

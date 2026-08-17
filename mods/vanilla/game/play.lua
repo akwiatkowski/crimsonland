@@ -564,7 +564,7 @@ end
 
 local function update_player(game, dt)
 	local p = game.player
-	local want = input.intent(game)
+	local want = input.intent(game, dt)
 	local dx, dy = want.dx, want.dy
 	p.moving = (dx ~= 0 or dy ~= 0)
 	if p.moving then

@@ -106,6 +106,31 @@ function harness.capture()
 	print(table.concat(out, "\n"))
 end
 
+-- --------------------------------------------------------------- the clock
+--
+-- Scenario time is synthetic. Pacing them on the real frame delta made every
+-- run hostage to the host: a minimized LÖVE window is App-Nap/occlusion
+-- throttled on macOS to ~5% CPU, so 65 seconds of scenario took 2.5-5 minutes
+-- of wall clock and looked exactly like a hang (`caffeinate` does not help —
+-- it stops idle sleep, not per-app occlusion throttling). Stepping a fixed dt
+-- as fast as the machine manages decouples game time from wall time, and as a
+-- bonus makes two runs of the same scenario identical, which real dt never was.
+
+local FIXED_DT = 1 / 60
+-- Updates per drawn frame. Presenting is what a throttled window makes slow
+-- (measured at ~9 fps minimized), and nothing but a capture ever reads the
+-- result, so batching updates behind one draw is where the speedup comes from.
+-- Scenario steps still fire on the 1/60 grid inside the batch, and a due
+-- capture cuts the batch short — so this trades nothing but window smoothness.
+local STEPS_PER_FRAME = 30
+-- Fixed seed so creature spawns, drops and perk offers repeat run to run.
+-- The value is arbitrary; only its constancy matters.
+local RANDOM_SEED = 20140101
+-- Scenario seconds to keep running after the last step and capture. A real-time
+-- run could be left to idle until the user closed the window; a fast-forward
+-- one would spin a core until then, so scenarios now end themselves.
+local LINGER = 1.0
+
 -- ------------------------------------------------------------ scenario run
 
 --- Wrap love.update to execute a scenario (src/test/scenarios/<name>.lua):
@@ -118,11 +143,21 @@ function harness.install(scenario_name)
 	pcall(love.window.minimize)
 	-- and out of the user's ears: master-mute, game code never notices
 	love.audio.setVolume(0)
+	-- nothing waits on the display in fast-forward, and vsync would cap the
+	-- whole run at the refresh rate
+	pcall(love.window.setVSync, 0)
+	love.math.setRandomSeed(RANDOM_SEED)
 
 	local elapsed = 0
 	local step_idx = 1
 	local capture_idx = 1
 	local captures = scenario.captures or {}
+	-- A capture reads the canvas, which only the next draw refreshes — so it
+	-- is requested here and taken by the loop below, after presenting.
+	local capture_due = false
+	-- love.event.quit only takes effect at the next poll, which is a whole
+	-- batch of updates away; without this the scenario ends 30 times over.
+	local done = false
 
 	local base_update = love.update
 	love.update = function(dt)
@@ -143,7 +178,50 @@ function harness.install(scenario_name)
 		end
 		if captures[capture_idx] and elapsed >= captures[capture_idx] then
 			capture_idx = capture_idx + 1
-			harness.capture()
+			capture_due = true
+		end
+
+		local last = math.max(scenario[#scenario] and scenario[#scenario].t or 0,
+			captures[#captures] or 0)
+		if not done and step_idx > #scenario and capture_idx > #captures
+			and elapsed >= last + LINGER then
+			done = true
+			print(("[test] scenario '%s' complete (%.1fs)"):format(scenario_name, elapsed))
+			love.event.quit(0)
+		end
+	end
+
+	-- LÖVE's own love.run also owns love.load and the event pump; replacing it
+	-- means owning both. Everything here matches the stock loop except the
+	-- clock: no love.timer.step, and no sleep.
+	function love.run()
+		if love.load then love.load(love.arg.parseGameArguments(arg), arg) end
+
+		return function()
+			love.event.pump()
+			for name, a, b, c, d, e, f in love.event.poll() do
+				if name == "quit" then return a or 0 end
+				love.handlers[name](a, b, c, d, e, f)
+			end
+
+			for _ = 1, STEPS_PER_FRAME do
+				love.update(FIXED_DT)
+				-- a capture wants a fresh canvas, and a finished scenario has
+				-- nothing left to simulate: both end the batch early
+				if capture_due or done then break end
+			end
+
+			if love.graphics.isActive() then
+				love.graphics.origin()
+				love.graphics.clear(love.graphics.getBackgroundColor())
+				love.draw()
+				love.graphics.present()
+			end
+
+			if capture_due then
+				capture_due = false
+				harness.capture()
+			end
 		end
 	end
 end

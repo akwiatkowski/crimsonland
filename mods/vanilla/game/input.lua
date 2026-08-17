@@ -14,10 +14,10 @@
 
 local input = {}
 
---- function(game) -> intent. nil means the human at the keyboard.
+--- function(game, dt) -> intent. nil means the human at the keyboard.
 input.controller = nil
 
-local function human(game)
+local function human(game, dt)
 	local dx, dy = 0, 0
 	if love.keyboard.isDown("w") or love.keyboard.isDown("up") then dy = dy - 1 end
 	if love.keyboard.isDown("s") or love.keyboard.isDown("down") then dy = dy + 1 end
@@ -43,8 +43,11 @@ function input.set_controller(fn)
 	input.controller = fn
 end
 
-function input.intent(game)
-	return (input.controller or human)(game)
+--- `dt` is the frame's own delta, not wall-clock: under the autotest's
+-- fixed-timestep clock those two differ, and a controller that times itself
+-- off the real clock stops behaving the same way in a test as in a game.
+function input.intent(game, dt)
+	return (input.controller or human)(game, dt)
 end
 
 return input

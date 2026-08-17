@@ -98,7 +98,7 @@ NX_SetCursor NX_GetInterface NX_GetTime NX_FileExists NX_Popup NX_CallExtension`
 2. Implement a runtime on **LÖVE 11.x** (LuaJIT = Lua 5.1 compatible) — love2d's
    image/audio/draw API maps closely onto NX_*. Add `LuaInclude` shim.
 3. Milestones: main menu renders ✓ → menu navigation ✓ → gameplay loop ✓
-   (first playable quest mode in `src/game/`) → polish (perks, powerups, FX,
+   (first playable quest mode) → polish (perks, powerups, FX,
    survival mode, persistence; achievements/leaderboards are stubbed/optional).
 
 ## Mod architecture (engine = console, mod = cartridge)
@@ -108,14 +108,14 @@ NX_SetCursor NX_GetInterface NX_GetTime NX_FileExists NX_Popup NX_CallExtension`
   `game` hooks (update/draw/pause/unpause/to_main_menu/on_ui_click), `save`
   (load/flush), and optional `paths` overrides for total conversions.
 - Selected with `--mod=<name>` (`make run MOD=<name>`), default `vanilla`.
-- `mods/vanilla/` is the clean-room Crimsonland; its implementation still
-  lives in `src/game/` (predates the architecture — physically moving it is
-  fine in a quiet window, only the descriptor's requires change).
+- `mods/vanilla/` is the clean-room Crimsonland, implementation and all
+  (`mods/vanilla/game/`). Nothing under `src/` requires it: the engine and the
+  test harness reach the game only through the descriptor.
 - ORDERING: `mod.select()` runs before `src.engine` loads, because engine
   modules capture asset roots from `src.engine.paths` at require time and
   path overrides mutate that table in place.
 
-## Gameplay layer (src/game/)
+## Gameplay layer (mods/vanilla/game/)
 
 - `data.lua` — loads original XML datasets (weapons, creatures, variants,
   terrains, chapters) into Lua tables

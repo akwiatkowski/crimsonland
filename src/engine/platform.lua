@@ -66,7 +66,7 @@ function platform.current()
 	return profiles[platform.current_profile]
 end
 
--- state snapshot for the save system (src/game/save.lua)
+-- state snapshot for the save system (the mod's save module)
 -- Settings the options screens change. The original kept these in the profile
 -- blob; here they are their own table so the audio module can be pointed at
 -- them on load without digging through profile values.

@@ -57,11 +57,16 @@ Done:
 - [x] Weapon and perk galleries with hover details
 - [x] Options that apply and persist (volume sliders, windowed)
 
+- [x] Achievements (22 from `achievements.xml`, awarded from save data)
+- [x] "New weapon/perk unlocked" celebrations on the original screens
+- [x] Resolution picker (`Listbox` comp) and `required_features` gating, so
+      platform-specific buttons stop showing up
+- [x] Mod architecture phase 2: the game lives entirely in `mods/vanilla/`
+
 Next:
 
-- [ ] Achievements: 23 defined in `achievements.xml` with art, none awarded
-- [ ] Mod arch phase 2: move `src/game/` into `mods/vanilla/`
-- [ ] Resolution picker (the display screen's `Listbox` comp is unimplemented)
+- [ ] Custom Quests: the format is documented in the pak's own sample set
+- [ ] Gamepad support (`joystick` is enabled but unused)
 
 ## Rebuilding from scratch
 
@@ -87,7 +92,7 @@ Escape aborts the quest back to the menu.
 |-------------------------|----------------------------------------------------|
 | `main.lua`, `conf.lua`  | LÖVE entry point (game only)                       |
 | `src/engine/`           | Reimplemented 10tons engine runtime (screens, comps, NX_* API) |
-| `src/game/`             | Gameplay reimplementation (quests, creatures, weapons) |
+| `mods/vanilla/`         | The game as a mod: descriptor + `game/` (quests, creatures, weapons, UI screens) |
 | `src/test/`             | Autotest harness + scripted scenarios (loaded only with `--autotest`) |
 | `tools/`                | `extract_pak.py` — PAK V11 extractor               |
 | `vendor/`               | Original rar, installer, `extracted/`, `assets*/` (gitignored) |

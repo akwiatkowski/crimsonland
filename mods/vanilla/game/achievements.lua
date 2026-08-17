@@ -11,7 +11,7 @@
 -- than quietly dropped.
 
 local comps = require("src.engine.comps")
-local save = require("src.game.save")
+local save = require("mods.vanilla.game.save")
 local xml = require("src.xml")
 
 local paths = require("src.engine.paths")
@@ -78,7 +78,7 @@ local RULES = {
 
 	--- "Unlock all Perks" — against the roster this port implements.
 	PERKY = function()
-		for _, p in ipairs(require("src.game.perks").list) do
+		for _, p in ipairs(require("mods.vanilla.game.perks").list) do
 			if not save.game.seen.perks[p.id] then return false end
 		end
 		return true

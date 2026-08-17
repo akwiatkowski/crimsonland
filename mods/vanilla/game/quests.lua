@@ -10,7 +10,7 @@
 --   boss = { variant=<variant table>, count=n } or nil
 -- }
 
-local data = require("src.game.data")
+local data = require("mods.vanilla.game.data")
 
 local quests = {}
 

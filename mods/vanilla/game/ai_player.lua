@@ -1,5 +1,5 @@
 -- An AI that plays the game through the same intent interface a human uses
--- (src/game/input.lua), so it is a player rather than a script poking state.
+-- (game/input.lua), so it is a player rather than a script poking state.
 --
 -- Two users: the attract-mode demo behind the main menu — the original's
 -- timeline says the menu backdrop IS the game (`parm_demo="MENU_COMBAT_1..5"`)

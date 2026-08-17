@@ -5,15 +5,15 @@
 
 local assets = require("src.engine.assets")
 local audio = require("src.engine.audio")
-local bms = require("src.game.bms")
-local data = require("src.game.data")
+local bms = require("mods.vanilla.game.bms")
+local data = require("mods.vanilla.game.data")
 local fx = require("src.engine.fx")
-local hud = require("src.game.hud")
-local ai_player = require("src.game.ai_player")
-local input = require("src.game.input")
-local particles = require("src.game.particles")
-local perks = require("src.game.perks")
-local quests = require("src.game.quests")
+local hud = require("mods.vanilla.game.hud")
+local ai_player = require("mods.vanilla.game.ai_player")
+local input = require("mods.vanilla.game.input")
+local particles = require("mods.vanilla.game.particles")
+local perks = require("mods.vanilla.game.perks")
+local quests = require("mods.vanilla.game.quests")
 
 local game = {}
 
@@ -715,7 +715,7 @@ function damage_creature(game, c, dmg)
 		game.kills = game.kills + 1
 		-- Home Wrecker counts nests: a den is a creature that hatches others
 		if c.spawn_cd and not game.demo then
-			local st = require("src.game.save").game.stats
+			local st = require("mods.vanilla.game.save").game.stats
 			st.dens = st.dens + 1
 		end
 		if c.is_boss then
@@ -827,9 +827,9 @@ local function update_drops(game, dt)
 				-- first time this profile has held it: the pak has a screen
 				-- for that (attract mode does not get to unlock anything)
 				if not game.demo then
-					require("src.game.unlocks").saw_weapon(d.weapon)
+					require("mods.vanilla.game.unlocks").saw_weapon(d.weapon)
 					if d.weapon.id == "BLOW_TORCH" then
-						local st = require("src.game.save").game.stats
+						local st = require("mods.vanilla.game.save").game.stats
 						st.blowtorches = st.blowtorches + 1
 					end
 				end
@@ -1103,11 +1103,11 @@ function game.update(dt)
 		game.outcome = "won"
 		game.end_timer = 1.2
 		print("[game] quest completed!")
-		require("src.game.save").mark_quest_completed(game.chapter, game.quest,
+		require("mods.vanilla.game.save").mark_quest_completed(game.chapter, game.quest,
 			game.difficulty, game.player.hp >= game.player.max_hp)
 		if not game.demo then
-			require("src.game.save").record_session(game)
-			require("src.game.achievements").evaluate(game)
+			require("mods.vanilla.game.save").record_session(game)
+			require("mods.vanilla.game.achievements").evaluate(game)
 		end
 	elseif game.player.hp <= 0 then
 		game.outcome = "lost"
@@ -1125,7 +1125,7 @@ function game.update(dt)
 		end
 		-- the AI's attract-mode runs are nobody's score and nobody's statistics
 		if not game.demo then
-			local save = require("src.game.save")
+			local save = require("mods.vanilla.game.save")
 			-- every endless mode keeps its own best, not just survival
 			if game.mode ~= "quest" then
 				game.new_highscore = save.record_run(game.mode, game.score,
@@ -1133,7 +1133,7 @@ function game.update(dt)
 				if game.new_highscore then print("[game] new local high score!") end
 			end
 			save.record_session(game)
-			require("src.game.achievements").evaluate(game)
+			require("mods.vanilla.game.achievements").evaluate(game)
 		end
 	end
 end
@@ -1321,7 +1321,7 @@ function game.draw()
 	end
 
 	-- HUD (screen space): original 2014 art — health pie, crosshair with
-	-- reload sweep, XP strip, effect timers (src/game/hud.lua)
+	-- reload sweep, XP strip, effect timers (game/hud.lua)
 	hud.draw(game)
 end
 
@@ -1371,7 +1371,7 @@ end
 
 local function decorate_quest_screen(screen)
 	local comps = require("src.engine.comps")
-	local save = require("src.game.save")
+	local save = require("mods.vanilla.game.save")
 	for i = 1, save.QUESTS_PER_CHAPTER do
 		local comp = screen.compmap["Quest_" .. i]
 		if comp then
@@ -1388,7 +1388,7 @@ end
 
 local function decorate_chapter_screen(screen)
 	local comps = require("src.engine.comps")
-	local save = require("src.game.save")
+	local save = require("mods.vanilla.game.save")
 	local chapter = 1
 	while screen.compmap["Chapter_" .. chapter] do
 		local comp = screen.compmap["Chapter_" .. chapter]
@@ -1406,19 +1406,19 @@ end
 --- Frames the pak ships empty (high scores, statistics) get their contents
 -- painted from the save file.
 function game.on_screen_draw(screen_name, screen)
-	require("src.game.records").draw(screen_name, screen)
-	require("src.game.gallery").draw(screen_name, screen)
-	require("src.game.unlocks").draw(screen_name, screen)
-	require("src.game.achievements").draw(screen_name, screen)
+	require("mods.vanilla.game.records").draw(screen_name, screen)
+	require("mods.vanilla.game.gallery").draw(screen_name, screen)
+	require("mods.vanilla.game.unlocks").draw(screen_name, screen)
+	require("mods.vanilla.game.achievements").draw(screen_name, screen)
 end
 
 --- Screens the engine pushes carry no progress state of their own.
 function game.on_screen_enter(screen_name, screen)
-	require("src.game.records").prepare(screen_name, screen)
-	require("src.game.gallery").prepare(screen_name, screen)
-	require("src.game.unlocks").prepare(screen_name, screen)
-	require("src.game.achievements").prepare(screen_name, screen)
-	require("src.game.display").prepare(screen_name, screen)
+	require("mods.vanilla.game.records").prepare(screen_name, screen)
+	require("mods.vanilla.game.gallery").prepare(screen_name, screen)
+	require("mods.vanilla.game.unlocks").prepare(screen_name, screen)
+	require("mods.vanilla.game.achievements").prepare(screen_name, screen)
+	require("mods.vanilla.game.display").prepare(screen_name, screen)
 	if screen_name == "MainMenu" then
 		-- reaching the menu with nothing running means attract mode
 		if not game.active then game.start_demo() end
@@ -1435,8 +1435,8 @@ function game.on_ui_click(screen_name, comp_name)
 	-- no handler for it, because the C++ side popped the screen. Skip screens
 	-- whose own script already started leaving, or they would pop twice.
 	-- the unlock celebrations have no button on them at all: any click closes
-	if require("src.game.unlocks").on_click(screen_name) then return true end
-	if require("src.game.display").on_click(screen_name, comp_name,
+	if require("mods.vanilla.game.unlocks").on_click(screen_name) then return true end
+	if require("mods.vanilla.game.display").on_click(screen_name, comp_name,
 		require("src.engine.screens").find(screen_name)) then return true end
 
 	if comp_name == "Back" then
@@ -1448,7 +1448,7 @@ function game.on_ui_click(screen_name, comp_name)
 	if screen_name == "SelectChapter" then
 		local ch = comp_name:match("^Chapter_(%d+)$")
 		if ch then
-			if not require("src.game.save").is_chapter_unlocked(tonumber(ch)) then
+			if not require("mods.vanilla.game.save").is_chapter_unlocked(tonumber(ch)) then
 				return true -- locked: the button is inactive, this is the backstop
 			end
 			selected_chapter = tonumber(ch)
@@ -1480,7 +1480,7 @@ function game.on_ui_click(screen_name, comp_name)
 	elseif screen_name == "PlayMenuQuests" then
 		local q = comp_name:match("^Quest_(%d+)$")
 		if q then
-			if not require("src.game.save").is_quest_unlocked(selected_chapter, tonumber(q)) then
+			if not require("mods.vanilla.game.save").is_quest_unlocked(selected_chapter, tonumber(q)) then
 				return true
 			end
 			local timeline = require("src.engine.timeline")
@@ -1496,7 +1496,7 @@ function game.on_ui_click(screen_name, comp_name)
 			perk.apply(game.mods, game)
 			game.perk_choices = nil
 			audio.play_sound("sfx/unlocked")
-			if not game.demo then require("src.game.unlocks").saw_perk(perk) end
+			if not game.demo then require("mods.vanilla.game.unlocks").saw_perk(perk) end
 			print(("[game] perk chosen: %s"):format(perk.name))
 			local screens = require("src.engine.screens")
 			screens.pop("PickAPerk")
@@ -1582,7 +1582,7 @@ function game.selected_chapter() return selected_chapter end
 
 --- The engine asks for this when a settings screen applies something.
 function game.save_settings()
-	require("src.game.save").flush()
+	require("mods.vanilla.game.save").flush()
 end
 
 return game

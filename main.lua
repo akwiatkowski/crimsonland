@@ -1,5 +1,5 @@
 -- Game entry point. Engine lives in src/engine; game content is a mod
--- (mods/<name>/, default "vanilla" = the clean-room Crimsonland in src/game).
+-- (mods/<name>/, default "vanilla" = the clean-room Crimsonland).
 --
 -- `--mod=<name>` selects the mod. `--autotest[=scenario]` (make test)
 -- additionally loads the automated test harness from src/test — a normal

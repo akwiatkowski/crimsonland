@@ -12,8 +12,8 @@
 local comps = require("src.engine.comps")
 local font = require("src.engine.font")
 local fx = require("src.engine.fx")
-local gallery = require("src.game.gallery")
-local save = require("src.game.save")
+local gallery = require("mods.vanilla.game.gallery")
+local save = require("mods.vanilla.game.save")
 
 local unlocks = {}
 
@@ -98,7 +98,7 @@ end
 
 function unlocks.saw_perk(perk)
 	if not perk then return end
-	for i, p in ipairs(require("src.game.perks").list) do
+	for i, p in ipairs(require("mods.vanilla.game.perks").list) do
 		if p.id == perk.id then
 			if save.mark_seen("perks", perk.id) then
 				unlocks.show("PerkUnlocked", i)

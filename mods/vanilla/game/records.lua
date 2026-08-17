@@ -7,7 +7,7 @@
 
 local comps = require("src.engine.comps")
 local font = require("src.engine.font")
-local save = require("src.game.save")
+local save = require("mods.vanilla.game.save")
 
 local records = {}
 

@@ -1,5 +1,5 @@
 -- Combat coverage: menus -> quest 1.1 -> hand the player to the AI and let it
--- fight. Until src/game/input.lua existed no scenario could pull a trigger
+-- fight. Until the input layer existed no scenario could pull a trigger
 -- (the game polled love.mouse.isDown, which reads real hardware), so weapons,
 -- hits, kills, drops, gore and shell casings had no automated exercise at all.
 --
@@ -7,12 +7,12 @@
 -- zero means something on the firing path broke.
 
 local function take_over()
-	require("src.game.input").set_controller(
-		require("src.game.ai_player").controller())
+	require("mods.vanilla.game.input").set_controller(
+		require("mods.vanilla.game.ai_player").controller())
 end
 
 local function report()
-	local g = require("src.game.play")
+	local g = require("mods.vanilla.game.play")
 	print(string.format("[combat] t=%.1f shots=%d hits=%d kills=%d drops=%d hp=%d",
 		g.time, g.shots, g.hits, g.kills, #g.drops, g.player.hp))
 end

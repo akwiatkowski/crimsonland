@@ -52,8 +52,11 @@ function harness.capture()
 	end
 	print(table.concat(info, "\n"))
 
-	local game = require("src.game.play")
-	if game.active then
+	-- whatever mod is loaded, not vanilla by name: the harness belongs to the
+	-- engine and the engine does not know what a quest is
+	local game = require("src.engine.mod").current
+	game = game and game.game
+	if game and game.active then
 		print(string.format("  game mode=%s t=%.1f hp=%d kills=%d/%s creatures=%d bullets=%d",
 			game.mode or "?", game.time, game.player.hp, game.kills,
 			tostring(game.kills_goal or "inf"), #game.creatures, #game.bullets))

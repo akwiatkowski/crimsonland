@@ -13,9 +13,9 @@
 -- plate the layout does declare).
 
 local comps = require("src.engine.comps")
-local data = require("src.game.data")
+local data = require("mods.vanilla.game.data")
 local font = require("src.engine.font")
-local perks = require("src.game.perks")
+local perks = require("mods.vanilla.game.perks")
 
 local gallery = {}
 
@@ -28,7 +28,7 @@ local DIM = { 0.55, 0.53, 0.5, 1 }
 local UNIMPLEMENTED = { 0.35, 0.35, 0.35, 1 }
 
 --- Entry behind slot `index` of a gallery: the grids are in data order. The
--- unlock screens use the same grids, so this is shared with src/game/unlocks.
+-- unlock screens use the same grids, so this is shared with game/unlocks.
 function gallery.entry_at(kind, index)
 	if kind == "weapon" then
 		data.load_all()

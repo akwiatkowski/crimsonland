@@ -11,7 +11,17 @@ local FILE = "save.lua"
 -- gameplay progress with defaults; load() replaces the contents in place
 save.game = {
 	quests_completed = {}, -- ["chapter.quest"] = true
-	survival_best = { score = 0, time = 0, kills = 0 },
+	survival_best = { score = 0, time = 0, kills = 0 }, -- kept: pre-bests saves
+	bests = {}, -- [mode] = { score, time, kills } for every endless mode
+	stats = { -- lifetime totals, the Statistics screen's whole content
+		kills = 0,
+		shots = 0,
+		hits = 0,
+		deaths = 0,
+		quests_won = 0,
+		runs = 0,
+		play_time = 0,
+	},
 }
 
 -- ------------------------------------------------------------- serializer
@@ -62,6 +72,12 @@ function save.load()
 		save.game.quests_completed = state.game.quests_completed or {}
 		save.game.survival_best = state.game.survival_best
 			or { score = 0, time = 0, kills = 0 }
+		save.game.bests = state.game.bests or {}
+		for k, v in pairs(state.game.stats or {}) do save.game.stats[k] = v end
+		-- saves written before per-mode bests existed only knew survival
+		if not save.game.bests.survival and save.game.survival_best.score > 0 then
+			save.game.bests.survival = save.game.survival_best
+		end
 	end
 	print("[save] loaded")
 end
@@ -107,15 +123,47 @@ function save.is_quest_unlocked(chapter, quest)
 	return save.is_quest_completed(chapter, quest - 1)
 end
 
---- Record a survival run; returns true when it is a new best score.
-function save.record_survival(score, time, kills)
-	local best = save.game.survival_best
-	local is_best = score > (best.score or 0)
+-- --------------------------------------------------------- scores and stats
+
+--- Endless modes the High Scores screen lists, in menu order.
+save.ENDLESS_MODES = {
+	{ id = "survival", label = "Survival" },
+	{ id = "rush", label = "Rush" },
+	{ id = "blitz", label = "Blitz" },
+	{ id = "waves", label = "Waves" },
+	{ id = "nukefism", label = "Nukefism" },
+	{ id = "weaponpicker", label = "Weapon Picker" },
+}
+
+function save.best(mode)
+	return save.game.bests[mode]
+end
+
+--- Record an endless run; returns true when it beats that mode's best score.
+function save.record_run(mode, score, time, kills)
+	local best = save.game.bests[mode]
+	local is_best = not best or score > (best.score or 0)
 	if is_best then
-		best.score, best.time, best.kills = score, time, kills
+		save.game.bests[mode] = { score = score, time = time, kills = kills }
+		if mode == "survival" then save.game.survival_best = save.game.bests[mode] end
 	end
 	save.flush()
 	return is_best
+end
+
+--- Fold a finished session into the lifetime totals the Statistics screen shows.
+function save.record_session(game)
+	local s = save.game.stats
+	s.runs = s.runs + 1
+	s.kills = s.kills + (game.kills or 0)
+	s.shots = s.shots + (game.shots or 0)
+	s.hits = s.hits + (game.hits or 0)
+	s.play_time = s.play_time + (game.time or 0)
+	if game.outcome == "lost" then s.deaths = s.deaths + 1 end
+	if game.outcome == "won" and game.mode == "quest" then
+		s.quests_won = s.quests_won + 1
+	end
+	save.flush()
 end
 
 return save

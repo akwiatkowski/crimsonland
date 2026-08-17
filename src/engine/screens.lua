@@ -234,6 +234,7 @@ function screens.update(dt)
 end
 
 function screens.draw()
+	local mod = require("src.engine.mod")
 	for _, s in ipairs(screens.stack) do
 		for _, c in ipairs(s.comps) do
 			if not c.parent then
@@ -241,6 +242,10 @@ function screens.draw()
 			end
 		end
 		screens.call(s, "OnDraw")
+		-- several pak layouts are just a frame with a Marker where the C++
+		-- side painted the contents (high scores, statistics); the mod fills
+		-- those in, after the script's own OnDraw
+		mod.game_call("on_screen_draw", s.name, s)
 	end
 end
 

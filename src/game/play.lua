@@ -247,9 +247,9 @@ function game.start_demo()
 		game.player.ammo = w.clip_size
 	end
 	input.set_controller(ai_player.controller())
-	-- gunfire belongs under the menu music, not over it
+	-- gunfire belongs under the menu music, not over it; the menu script picks
+	-- the track itself (main-menu-events.lua switches to music/crimson_theme)
 	audio.sound_volume = 0.25
-	audio.switch_music("music/crimsonland", 0, 1)
 end
 
 function game.start_survival(mode)
@@ -1067,6 +1067,7 @@ function game.update(dt)
 		game.end_timer = 1.2
 		print("[game] quest completed!")
 		require("src.game.save").mark_quest_completed(game.chapter, game.quest)
+		if not game.demo then require("src.game.save").record_session(game) end
 	elseif game.player.hp <= 0 then
 		game.outcome = "lost"
 		game.end_timer = 1.6
@@ -1081,10 +1082,16 @@ function game.update(dt)
 			end
 			audio.play_sound("sfx/explosion_nuke")
 		end
-		if game.mode == "survival" then
-			game.new_highscore = require("src.game.save").record_survival(
-				game.score, game.time, game.kills)
-			if game.new_highscore then print("[game] new local high score!") end
+		-- the AI's attract-mode runs are nobody's score and nobody's statistics
+		if not game.demo then
+			local save = require("src.game.save")
+			-- every endless mode keeps its own best, not just survival
+			if game.mode ~= "quest" then
+				game.new_highscore = save.record_run(game.mode, game.score,
+					game.time, game.kills)
+				if game.new_highscore then print("[game] new local high score!") end
+			end
+			save.record_session(game)
 		end
 	end
 end
@@ -1354,8 +1361,15 @@ local function decorate_chapter_screen(screen)
 	end
 end
 
+--- Frames the pak ships empty (high scores, statistics) get their contents
+-- painted from the save file.
+function game.on_screen_draw(screen_name, screen)
+	require("src.game.records").draw(screen_name, screen)
+end
+
 --- Screens the engine pushes carry no progress state of their own.
 function game.on_screen_enter(screen_name, screen)
+	require("src.game.records").prepare(screen_name, screen)
 	if screen_name == "MainMenu" then
 		-- reaching the menu with nothing running means attract mode
 		if not game.active then game.start_demo() end
@@ -1479,7 +1493,11 @@ function game.on_ui_click(screen_name, comp_name)
 			game.start_survival(game.mode)
 			require("src.engine.timeline").begin("Game")
 			return true
-		elseif comp_name == "PlayMenu" or comp_name == "HighScores" then
+		elseif comp_name == "HighScores" then
+			-- the screen ships the button but no handler; the C++ side had it
+			require("src.engine.screens").push("HighScores")
+			return true
+		elseif comp_name == "PlayMenu" then
 			game.to_main_menu()
 			return true
 		end

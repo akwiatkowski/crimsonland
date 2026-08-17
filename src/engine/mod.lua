@@ -5,7 +5,8 @@
 --     name  = "vanilla",
 --     game  = { update(dt), draw(), pause(), unpause(), to_main_menu(),
 --               on_ui_click(screen_name, comp_name),
---               on_screen_enter(screen_name, screen) },  -- all optional
+--               on_screen_enter(screen_name, screen),
+--               on_screen_draw(screen_name, screen) },   -- all optional
 --     save  = { load(), flush() },                       -- optional
 --     paths = { ASSETS=..., SFX=..., MUSIC=... },        -- optional overrides
 --   }

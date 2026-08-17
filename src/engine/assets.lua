@@ -53,6 +53,9 @@ function assets.resolve(path)
 	end
 	local base = ROOT_MAIN .. "/" .. path
 	if love.filesystem.getInfo(base) then return base, 1 end
+	-- the original engine resolves bitmaps without an extension, and the pak
+	-- relies on it (play-menu-survival.lua asks for "ui/gfx/lock-large")
+	if not path:find("%.%w+$") then return assets.resolve(path .. ".png") end
 	return nil
 end
 

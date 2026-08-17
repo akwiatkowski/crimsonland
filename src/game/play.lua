@@ -1236,11 +1236,96 @@ end
 local selected_chapter = 1
 local selected_difficulty = "NORMAL"
 
+-- ----------------------------------------------------------- progression UI
+
+--- Hang the pak's lock art on a button. Giving the overlay the button's own
+-- align and a zero position puts both anchors on the same point, so the lock
+-- lands on the button whatever alignment the layout script chose.
+local function attach_lock(comp, comps, bitmap)
+	if comp.lock_overlay then return end
+	-- comps.set takes the script bridge's packed varargs, so scalars are wrapped
+	local lock = comps.new("Image", comp.name .. "_lock", comp.screen)
+	comps.set(lock, "image.bitmap", { bitmap })
+	comps.set(lock, "align", { comp.props.align })
+	comps.set(lock, "position", { 0, 0 })
+	comps.set(lock, "position.z", { 10 })
+	lock.parent = comp
+	table.insert(comp.children, lock)
+	comp.lock_overlay = lock
+end
+
+--- Paint one quest/chapter button according to its progress state. The C++
+-- engine did this from the same save data; the layout scripts only lay the
+-- grid out. Locked buttons go inactive, so comps.hit ignores them, and wear
+-- the lock over a dimmed plate.
+local function mark_button(comp, comps, state, lock_bitmap)
+	comps.set(comp, "active", { state ~= "locked" })
+	if state == "locked" then
+		comps.set(comp, "button.text", { "" })
+		attach_lock(comp, comps, lock_bitmap)
+	elseif comp.lock_overlay then
+		comps.set(comp.lock_overlay, "visible", { false })
+	end
+	-- cleared ground reads dimmer than the next quest waiting to be played
+	local shade = { 1, 1, 1, 1 }
+	if state == "done" then shade = { 0.55, 0.55, 0.55, 1 } end
+	if state == "locked" then shade = { 0.4, 0.4, 0.4, 1 } end
+	for _, s in ipairs({ "idle", "over", "pressed", "disabled" }) do
+		comps.set(comp, "button.bitmap_color_" .. s, shade)
+	end
+end
+
+local function decorate_quest_screen(screen)
+	local comps = require("src.engine.comps")
+	local save = require("src.game.save")
+	for i = 1, save.QUESTS_PER_CHAPTER do
+		local comp = screen.compmap["Quest_" .. i]
+		if comp then
+			local state = "open"
+			if not save.is_quest_unlocked(selected_chapter, i) then
+				state = "locked"
+			elseif save.is_quest_completed(selected_chapter, i) then
+				state = "done"
+			end
+			mark_button(comp, comps, state, "ui/gfx/quest-lock.png")
+		end
+	end
+end
+
+local function decorate_chapter_screen(screen)
+	local comps = require("src.engine.comps")
+	local save = require("src.game.save")
+	local chapter = 1
+	while screen.compmap["Chapter_" .. chapter] do
+		local comp = screen.compmap["Chapter_" .. chapter]
+		local state = "open"
+		if not save.is_chapter_unlocked(chapter) then
+			state = "locked"
+		elseif save.is_quest_completed(chapter, save.QUESTS_PER_CHAPTER) then
+			state = "done"
+		end
+		mark_button(comp, comps, state, "ui/gfx/lock-small.png")
+		chapter = chapter + 1
+	end
+end
+
+--- Screens the engine pushes carry no progress state of their own.
+function game.on_screen_enter(screen_name, screen)
+	if screen_name == "SelectChapter" then
+		decorate_chapter_screen(screen)
+	elseif screen_name == "PlayMenuQuests" then
+		decorate_quest_screen(screen)
+	end
+end
+
 -- called by the screen manager after a screen's own OnClick
 function game.on_ui_click(screen_name, comp_name)
 	if screen_name == "SelectChapter" then
 		local ch = comp_name:match("^Chapter_(%d+)$")
 		if ch then
+			if not require("src.game.save").is_chapter_unlocked(tonumber(ch)) then
+				return true -- locked: the button is inactive, this is the backstop
+			end
 			selected_chapter = tonumber(ch)
 			local screens = require("src.engine.screens")
 			local comps = require("src.engine.comps")
@@ -1270,6 +1355,9 @@ function game.on_ui_click(screen_name, comp_name)
 	elseif screen_name == "PlayMenuQuests" then
 		local q = comp_name:match("^Quest_(%d+)$")
 		if q then
+			if not require("src.game.save").is_quest_unlocked(selected_chapter, tonumber(q)) then
+				return true
+			end
 			local timeline = require("src.engine.timeline")
 			game.start_quest(selected_chapter, tonumber(q), selected_difficulty)
 			timeline.begin("Game")

@@ -67,7 +67,9 @@ function harness.capture()
 		for _, c in ipairs(top.comps) do
 			if (c.type == "Button" or c.type == "Checkbox") and comps.get(c, "visible") then
 				local x, y, w, h = comps.screen_rect(c)
-				print(string.format("  hit %-20s x=%.0f y=%.0f w=%.0f h=%.0f", c.name, x, y, w, h))
+				print(string.format("  hit %-20s x=%.0f y=%.0f w=%.0f h=%.0f%s",
+					c.name, x, y, w, h,
+					comps.get(c, "active") and "" or " INACTIVE"))
 			end
 		end
 	end

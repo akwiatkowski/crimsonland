@@ -172,6 +172,9 @@ function screens.push(name, parm)
 	table.insert(screens.stack, s)
 	s.entered = true
 	screens.call(s, "OnEnter")
+	-- the C++ side used to fill in state the layout scripts know nothing about
+	-- (which quests are unlocked, which mode is available); the mod does it now
+	require("src.engine.mod").game_call("on_screen_enter", name, s)
 	return s
 end
 

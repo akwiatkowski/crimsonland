@@ -83,6 +83,30 @@ function save.mark_quest_completed(chapter, quest)
 	save.flush()
 end
 
+-- ------------------------------------------------------------- progression
+
+--- Quests per chapter — the quest grid in ui/play-menu-quests.lua has ten
+-- buttons and quests.lua puts the boss on the tenth.
+save.QUESTS_PER_CHAPTER = 10
+
+function save.is_quest_completed(chapter, quest)
+	return save.game.quests_completed[chapter .. "." .. quest] == true
+end
+
+--- A chapter opens once the previous chapter's boss quest is cleared; the
+-- first one is always open.
+function save.is_chapter_unlocked(chapter)
+	if chapter <= 1 then return true end
+	return save.is_quest_completed(chapter - 1, save.QUESTS_PER_CHAPTER)
+end
+
+--- Within an open chapter, a quest opens once the one before it is cleared.
+function save.is_quest_unlocked(chapter, quest)
+	if not save.is_chapter_unlocked(chapter) then return false end
+	if quest <= 1 then return true end
+	return save.is_quest_completed(chapter, quest - 1)
+end
+
 --- Record a survival run; returns true when it is a new best score.
 function save.record_survival(score, time, kills)
 	local best = save.game.survival_best

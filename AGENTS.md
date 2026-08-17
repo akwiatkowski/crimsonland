@@ -159,8 +159,12 @@ NX_SetCursor NX_GetInterface NX_GetTime NX_FileExists NX_Popup NX_CallExtension`
   `game.camera()` is read by the draw and again by the crosshair and they must
   agree), the flash, heat-haze sources, and blood decals stamped into the
   terrain canvas. Deliberately NO hit-stop: twenty things die a second here
-- `save.lua` — platform state + progress to LÖVE save dir (identity
-  crimsonland-mac), sandboxed load, flushed on quit/outcomes
+- `save.lua` — platform state + progress to `~/Library/Application Support/
+  Crimsonland/save.lua` (`paths.USER`; `Crimsonland-Test` under `--autotest`,
+  so a scripted run cannot complete a quest on a real profile). That is outside
+  the LÖVE sandbox, so this one module uses plain `io` and `os.execute mkdir`;
+  a save left in the old LÖVE save dir is read once and migrated. Sandboxed
+  load (`setfenv`), flushed on quit/outcomes
 - Quest kill-count/spawn tables are approximations — original quest defs were
   compiled into prog.dll; only `custom-quests/` ships as XML
 

@@ -1,12 +1,22 @@
 -- Persistence: profiles/statistics/settings (engine platform state) plus
 -- gameplay progress (completed quests, survival best) saved as a Lua table
--- in LÖVE's save directory (identity "crimsonland-mac", file "save.lua").
+-- in the port's own directory (src/engine/paths.lua: USER, which on macOS is
+-- ~/Library/Application Support/Crimsonland, and a separate one under test).
+--
+-- That directory is outside the LÖVE filesystem sandbox, so this is the one
+-- module in the port that reads and writes with plain `io`.
 
 local platform = require("src.engine.platform")
+local paths = require("src.engine.paths")
 
 local save = {}
 
-local FILE = "save.lua"
+local FILE = paths.USER .. "/save.lua"
+-- Saves written before the move lived in LÖVE's save directory. Read once, as
+-- a fallback; the next flush lands the same state in the new home and this
+-- copy is never consulted again. LÖVE's save directory is not split per
+-- environment the way paths.USER is, so a test run must not adopt it.
+local LEGACY_FILE = not paths.TESTING and "save.lua" or nil
 
 -- gameplay progress with defaults; load() replaces the contents in place
 save.game = {
@@ -60,9 +70,24 @@ end
 
 -- ------------------------------------------------------------ load / save
 
+--- The save text and where it came from, or nil when this profile is new.
+local function read_save()
+	local f = io.open(FILE, "r")
+	if f then
+		local text = f:read("*a")
+		f:close()
+		return text, FILE
+	end
+	if LEGACY_FILE and love.filesystem.getInfo(LEGACY_FILE) then
+		return love.filesystem.read(LEGACY_FILE), love.filesystem.getSaveDirectory()
+			.. "/" .. LEGACY_FILE
+	end
+end
+
 function save.load()
-	if not love.filesystem.getInfo(FILE) then return end
-	local chunk, err = love.filesystem.load(FILE)
+	local text, from = read_save()
+	if not text then return end
+	local chunk, err = loadstring(text, "@" .. from)
 	if not chunk then
 		print("[save] unreadable save file: " .. tostring(err))
 		return
@@ -91,7 +116,20 @@ function save.load()
 			save.game.bests.survival = save.game.survival_best
 		end
 	end
-	print("[save] loaded")
+	print("[save] loaded from " .. from)
+	-- Finish the move now rather than at whatever the first flush turns out to
+	-- be, so a profile read from the old location exists in the new one even if
+	-- this session ends without playing anything.
+	if from ~= FILE then save.flush() end
+end
+
+-- The save directory is absolute, so love.filesystem cannot create it and
+-- there is no mkdir in the Lua standard library. Once per process is enough.
+local dir_ready = false
+local function ensure_dir()
+	if dir_ready then return end
+	dir_ready = true
+	os.execute(("mkdir -p '%s'"):format(paths.USER))
 end
 
 function save.flush()
@@ -99,9 +137,14 @@ function save.flush()
 		platform = platform.export_state(),
 		game = save.game,
 	}
-	local ok, err = pcall(love.filesystem.write, FILE,
-		"return " .. serialize(state, ""))
-	if not ok then print("[save] write failed: " .. tostring(err)) end
+	ensure_dir()
+	local f, err = io.open(FILE, "w")
+	if not f then
+		print("[save] write failed: " .. tostring(err))
+		return
+	end
+	f:write("return " .. serialize(state, ""))
+	f:close()
 end
 
 -- ----------------------------------------------------------- game helpers

@@ -20,6 +20,16 @@ function love.conf(t)
 	t.window.msaa = 4
 	t.window.highdpi = true
 
+	-- An autotest run is scripted input into an offscreen renderer: nobody is
+	-- watching it, and it must not steal the foreground from whatever the
+	-- machine is actually doing. The harness also calls love.window.minimize,
+	-- but a window that is created visible has already flashed up and taken
+	-- focus by then — this one never appears at all. Drawing, canvases and
+	-- love.graphics.captureScreenshot all still work on a hidden window.
+	for _, a in ipairs(arg or {}) do
+		if a:match("^%-%-autotest") then t.window.visible = false end
+	end
+
 	t.modules.physics = false
 	t.modules.joystick = true
 	t.modules.video = false

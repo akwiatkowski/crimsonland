@@ -14,6 +14,7 @@ local input = require("mods.vanilla.game.input")
 local particles = require("mods.vanilla.game.particles")
 local perks = require("mods.vanilla.game.perks")
 local quests = require("mods.vanilla.game.quests")
+local customquests = require("mods.vanilla.game.customquests")
 
 local game = {}
 
@@ -240,6 +241,8 @@ local function init_session(terrain_chapter)
 	game.perk_choices = nil
 	game.pending_perks = 0 -- extra picks queued by Instant Winner & friends
 	game.death_clock = nil -- seconds left once the Death Clock perk is taken
+	game.custom = nil -- the authored quest being played, if any
+	game.custom_next = 1
 	-- brass, blood and smoke from the previous run must not follow the player
 	fx.clear("world")
 	game.score = 0
@@ -288,6 +291,46 @@ function game.start_quest(chapter, quest, difficulty)
 	game.active = true
 	audio.switch_music(ingame_music(chapter, quest), 0, 1)
 end
+
+--- An authored quest from custom-quests/ (game/customquests.lua).
+--
+-- Nothing is generated here: the spawn list is the whole level. There is no
+-- kill goal to reach and no palette to draw from — you win by clearing what
+-- the author placed, which is why this mode can be a five-creature puzzle or a
+-- boss arena and the endless modes cannot.
+function game.start_custom(quest)
+	game.demo = false
+	input.set_controller(nil)
+	audio.duck = 1
+
+	game.mode = "custom"
+	game.chapter = 1
+	game.quest = 0
+	game.difficulty = "NORMAL"
+	init_session(1)
+
+	game.custom = quest
+	game.custom_next = 1 -- index into quest.spawns
+	game.kills_goal = nil -- the spawn list decides when it is over
+	game.diff_mul = 1
+	game.weapon_cap = #data.weapon_order
+	game.spawn_interval = math.huge -- the generic spawner stays out of this
+	game.max_concurrent = 0
+	game.health_mul, game.damage_mul = HEALTH_SCALE_BASE, DAMAGE_SCALE_BASE
+
+	-- "weapon" in the file's INFO array: the author picks what you fight with
+	local w = quest.weapon and data.weapons[quest.weapon]
+	if w then
+		game.player.weapon = w
+		game.player.ammo = game.clip_size()
+	end
+
+	game.active = true
+	audio.switch_music(ingame_music(), 0, 1)
+	print(("[custom] %s by %s (%d spawn nodes)"):format(
+		quest.name, quest.author, #quest.spawns))
+end
+
 
 -- survival: creature types join the pool over time ("Variant_39" is the
 -- plasma-shooter spider; DEN_ALIEN hatches aliens until it is destroyed)
@@ -509,6 +552,34 @@ local WAVE_TYPES = {
 	"BEETLE", "MAGGOT", "CRABFLY",
 }
 
+--- Run an authored quest's spawn list.
+--
+-- The format's own comment says a node "can spawn earlier if no other
+-- creatures are alive", so a cleared field pulls the next node forward rather
+-- than leaving the player waiting out a timer they have already beaten. That
+-- one line is what lets an author write a paced fight instead of a schedule.
+local function update_custom(game)
+	local q = game.custom
+	if not q then return end
+	local node = q.spawns[game.custom_next]
+	if not node then return end
+
+	if game.time < node.time and #game.creatures > 0 then return end
+
+	game.custom_next = game.custom_next + 1
+	local variant = customquests.variant(node)
+	if not variant then
+		print(("[custom] unknown creature type '%s'"):format(tostring(node.type)))
+		return
+	end
+	for i = 1, node.count do
+		local x, y = customquests.place(node, i)
+		add_creature(game, variant,
+			math.max(32, math.min(WORLD_W - 32, x)),
+			math.max(32, math.min(WORLD_H - 32, y)))
+	end
+end
+
 local function update_waves_mode(game, dt)
 	game.health_mul = HEALTH_SCALE_BASE * (1 + (game.wave - 1) * 0.12)
 	game.damage_mul = DAMAGE_SCALE_BASE * (1 + (game.wave - 1) * 0.06)
@@ -630,6 +701,26 @@ local function update_perk_hover(screen)
 	local n = hover and hover.name:match("^PerkButton_(%d+)$")
 	local perk = n and game.perk_choices and game.perk_choices[tonumber(n)]
 	if perk then set_perk_desc(screen, perk) end
+end
+
+--- Point the custom-quest screen's two detail textboxes at one quest.
+local function set_custom_quest_details(screen, q)
+	local comps = require("src.engine.comps")
+	if screen.compmap.QuestName then
+		comps.set(screen.compmap.QuestName, "textbox.text", { q and q.name or "" })
+	end
+	if screen.compmap.QuestAuthor then
+		comps.set(screen.compmap.QuestAuthor, "textbox.text",
+			{ q and ("By " .. q.author) or "" })
+	end
+end
+
+-- the same idea on the custom-quest list: the two textboxes follow the pointer
+local function update_custom_quest_hover(screen)
+	local hover = screen._hover_comp
+	local n = hover and hover.name:match("^Quest_(%d+)$")
+	local q = n and customquests.all()[tonumber(n) + 1]
+	if q then set_custom_quest_details(screen, q) end
 end
 
 -- ------------------------------------------------------------ update
@@ -1311,7 +1402,11 @@ function game.update(dt)
 	local screens = require("src.engine.screens")
 	local top = screens.top()
 	if top and top.name ~= "GameCrimsonland" and not game.demo then
-		if top.name == "PickAPerk" then update_perk_hover(top) end
+		if top.name == "PickAPerk" then
+			update_perk_hover(top)
+		elseif top.name == "PlayMenuCustomQuests" then
+			update_custom_quest_hover(top)
+		end
 		return
 	end
 
@@ -1338,6 +1433,8 @@ function game.update(dt)
 		update_rush_ramp(game)
 	elseif game.mode == "waves" then
 		update_waves_mode(game, dt)
+	elseif game.mode == "custom" then
+		update_custom(game) -- an authored list, not a ramp
 	elseif game.mode ~= "quest" then
 		update_survival_ramp(game) -- survival, blitz, nukefism, weaponpicker
 	end
@@ -1404,8 +1501,21 @@ function game.update(dt)
 		end
 	end
 
+	-- An authored quest is won by clearing what the author placed: the spawn
+	-- list run out, and nothing of it left standing.
+	local custom_cleared = game.mode == "custom" and game.custom
+		and game.custom_next > #game.custom.spawns and #game.creatures == 0
+
 	-- win/lose (survival has no win condition; bosses must die to win)
-	if game.kills_goal and game.kills >= game.kills_goal
+	if custom_cleared then
+		game.outcome = "won"
+		game.end_timer = 1.2
+		print(("[custom] cleared: %s"):format(game.custom.name))
+		if not game.demo then
+			require("mods.vanilla.game.save").record_session(game)
+			require("mods.vanilla.game.achievements").evaluate(game)
+		end
+	elseif game.kills_goal and game.kills >= game.kills_goal
 		and game.boss_pending == 0 and game.bosses_alive == 0 then
 		game.outcome = "won"
 		game.end_timer = 1.2
@@ -1676,6 +1786,53 @@ local function mark_button(comp, comps, state, lock_bitmap)
 	end
 end
 
+--- The play menu ships a handler for a button it does not declare.
+--
+-- ui/play-menu-events.lua answers a click on "Play_CustomQuests" by pushing
+-- PlayMenuCustomQuests — the code is right there in the pak, and only the
+-- layout omits the comp, so the mode has been reachable-in-principle and
+-- unreachable-in-fact all along. Creating the button is the whole fix: the
+-- original's own script handles the click.
+--
+-- It goes under the Quests/Survival pair rather than beside them, because the
+-- aligner those two hang from is sized for two.
+local function add_custom_quests_button(screen)
+	if screen.compmap.Play_CustomQuests then return end
+	if #customquests.all() == 0 then return end -- nothing authored to play
+	local comps = require("src.engine.comps")
+	local panel = screen.compmap.panel
+	if not panel then return end
+
+	local c = comps.new("Button", "Play_CustomQuests", screen)
+	c._order = #screen.comps + 1
+	table.insert(screen.comps, c)
+	screen.compmap[c.name] = c
+	c.parent = panel
+	table.insert(panel.children, c)
+	comps.set(c, "inherit", { "SmallButton" })
+	comps.set(c, "align", { "HCENTER" })
+	comps.set(c, "position", { 0, 0.29 })
+	comps.set(c, "localize", { 0 })
+	comps.set(c, "button.text", { "Custom Quests" })
+end
+
+--- Fill the authored-quest list. The layout ships six Quest_N plates carrying
+-- the sample set's names as placeholders, plus QuestName/QuestAuthor textboxes
+-- the C++ side pointed at whichever one you were on.
+local function decorate_custom_quest_screen(screen)
+	local comps = require("src.engine.comps")
+	local list = customquests.all()
+	for i = 0, 5 do
+		local comp = screen.compmap["Quest_" .. i]
+		if comp then
+			local q = list[i + 1]
+			comps.set(comp, "visible", { q ~= nil })
+			if q then comps.set(comp, "button.text", { q.name }) end
+		end
+	end
+	set_custom_quest_details(screen, list[1])
+end
+
 local function decorate_quest_screen(screen)
 	local comps = require("src.engine.comps")
 	local save = require("mods.vanilla.game.save")
@@ -1733,6 +1890,10 @@ function game.on_screen_enter(screen_name, screen)
 		decorate_chapter_screen(screen)
 	elseif screen_name == "PlayMenuQuests" then
 		decorate_quest_screen(screen)
+	elseif screen_name == "PlayMenu" then
+		add_custom_quests_button(screen)
+	elseif screen_name == "PlayMenuCustomQuests" then
+		decorate_custom_quest_screen(screen)
 	end
 end
 
@@ -1813,6 +1974,16 @@ function game.on_ui_click(screen_name, comp_name)
 				game.pending_perks = game.pending_perks - 1
 				open_perk_screen(game)
 			end
+			return true
+		end
+	elseif screen_name == "PlayMenuCustomQuests" then
+		-- the plates are Quest_0..Quest_5, unlike every other screen's 1-based
+		-- grid, so the index is the list position directly
+		local n = comp_name:match("^Quest_(%d+)$")
+		local q = n and customquests.all()[tonumber(n) + 1]
+		if q then
+			game.start_custom(q)
+			require("src.engine.timeline").begin("Game")
 			return true
 		end
 	elseif screen_name == "PlayMenuSurvival" then

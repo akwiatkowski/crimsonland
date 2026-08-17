@@ -260,12 +260,20 @@ API.DeleteGameState = stub("DeleteGameState")
 
 API.SwitchMusic = function(name, fo, fi) audio.switch_music(name, fo, fi) end
 API.StopMusic = function() audio.stop_music() end
-API.PlaySound = function(name) audio.play_sound(name) end
+API.PlaySound = function(name) audio.play_ui_sound(name) end
 API.PlaySoundDelayed = function(name, delay) audio.play_sound_delayed(name, delay) end
 API.CacheSound = function(name) assets.sound(name, "sfx") end
-API.SetMusicVolume = function(v) audio.set_music_volume(v or 1) end
+-- volumes live in platform.settings so the options screens' changes survive a
+-- restart; audio.* stays the runtime value the mixer reads
+API.SetMusicVolume = function(v)
+	audio.set_music_volume(v or 1)
+	platform.settings.music_volume = audio.music_volume
+end
 API.GetMusicVolume = function() return audio.music_volume end
-API.SetSoundVolume = function(v) audio.sound_volume = v or 1 end
+API.SetSoundVolume = function(v)
+	audio.sound_volume = v or 1
+	platform.settings.sound_volume = audio.sound_volume
+end
 API.GetSoundVolume = function() return audio.sound_volume end
 API.GetCurrentMusicAsString = function() return audio.current_music or "" end
 API.PlaySoundWithMusicVolume = function(name) audio.play_sound(name, audio.music_volume) end
@@ -276,7 +284,11 @@ API.SuppressMusicForDuration = stub("SuppressMusicForDuration")
 -- -------------------------------------------------------------- profile API
 
 API.LoadProfiles = function() end
-API.SaveProfiles = function() end
+-- the options screens call this on OK; it is the only "write settings now"
+-- signal the scripts give us
+API.SaveProfiles = function()
+	if mod.current and mod.current.save.flush then mod.current.save.flush() end
+end
 API.GetProfile = function() return platform.current().name end
 API.SetProfile = function(name)
 	for i, p in ipairs(platform.profiles()) do
@@ -364,7 +376,10 @@ API.GetScreenPosX = function() return 0 end
 API.GetScreenPosY = function() return 0 end
 API.IsScreenWindowed = function() return not love.window.getFullscreen() end
 API.SetScreenWindowed = function(windowed)
-	love.window.setFullscreen(not (windowed == true or windowed == 1))
+	local want = (windowed == true or windowed == 1)
+	love.window.setFullscreen(not want)
+	platform.settings.windowed = want
+	-- the canvas follows via love.resize, which LÖVE fires on the toggle
 end
 API.GetMaximumTextureSize = function() return 8192 end
 API.GetOverlayZoom = function() return 1 end
@@ -681,6 +696,10 @@ function engine.start()
 
 		if mod.current == nil then mod.select("vanilla") end
 		if mod.current.save.load then mod.current.save.load() end
+		-- apply whatever the options screens stored last run
+		audio.sound_volume = platform.settings.sound_volume
+		audio.set_music_volume(platform.settings.music_volume)
+		if not platform.settings.windowed then love.window.setFullscreen(true) end
 		load_templates()
 		load_autoexec()
 		register_internal_screens()
@@ -731,6 +750,7 @@ function engine.start()
 
 	love.mousemoved = function(x, y) screens.mousemoved(x, y) end
 	love.mousepressed = function(x, y, button) screens.mousepressed(x, y, button) end
+	love.mousereleased = function(x, y, button) screens.mousereleased(x, y, button) end
 
 	-- debug overlay drawn last
 	local base_draw = love.draw

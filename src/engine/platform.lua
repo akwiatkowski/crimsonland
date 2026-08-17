@@ -53,12 +53,22 @@ function platform.current()
 end
 
 -- state snapshot for the save system (src/game/save.lua)
+-- Settings the options screens change. The original kept these in the profile
+-- blob; here they are their own table so the audio module can be pointed at
+-- them on load without digging through profile values.
+platform.settings = {
+	sound_volume = 1,
+	music_volume = 1,
+	windowed = true,
+}
+
 function platform.export_state()
 	return {
 		profiles = profiles,
 		current_profile = platform.current_profile,
 		stats = stats,
 		globals = globals,
+		settings = platform.settings,
 	}
 end
 
@@ -70,6 +80,7 @@ function platform.import_state(state)
 	if profiles[platform.current_profile] == nil then platform.current_profile = 1 end
 	if type(state.stats) == "table" then stats = state.stats end
 	if type(state.globals) == "table" then globals = state.globals end
+	for k, v in pairs(state.settings or {}) do platform.settings[k] = v end
 end
 
 -- ------------------------------------------------------------- extensions

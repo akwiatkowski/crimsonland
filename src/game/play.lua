@@ -181,7 +181,7 @@ end
 function game.start_quest(chapter, quest, difficulty)
 	game.demo = false
 	input.set_controller(nil)
-	audio.sound_volume = 1
+	audio.duck = 1
 	difficulty = difficulty or "NORMAL"
 	local diff_mul = DIFFICULTY[difficulty] or 1
 
@@ -247,15 +247,15 @@ function game.start_demo()
 		game.player.ammo = w.clip_size
 	end
 	input.set_controller(ai_player.controller())
-	-- gunfire belongs under the menu music, not over it; the menu script picks
-	-- the track itself (main-menu-events.lua switches to music/crimson_theme)
-	audio.sound_volume = 0.25
+	-- gunfire belongs under the menu music, not over it; ducking is separate
+	-- from the player's own volume setting, which the options screen reads
+	audio.duck = 0.25
 end
 
 function game.start_survival(mode)
 	game.demo = false
 	input.set_controller(nil)
-	audio.sound_volume = 1
+	audio.duck = 1
 	game.mode = mode or "survival"
 	game.chapter = 1
 	game.quest = 0

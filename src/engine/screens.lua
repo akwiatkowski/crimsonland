@@ -284,10 +284,30 @@ local function to_screen_coords(x, y)
 	return engine.to_reference(x, y)
 end
 
+--- Set a slider from a pointer position (reference x), 0..1 across its width.
+local function set_slider_from(comp, rx)
+	local sx, _, sw = comps.screen_rect(comp)
+	if not sw or sw <= 0 then return end
+	local v = math.max(0, math.min(1, (rx - sx) / sw))
+	comp.props["slider.value"] = v
+	-- the layout script applies it (audio-options-events reads the value back
+	-- out of the comp on every OnClick), so tell it the slider moved
+	screens.call(comp.screen, "OnClick", comp.name)
+end
+
 function screens.mousemoved(x, y)
 	local rx, ry = to_screen_coords(x, y)
 	local top = screens.top()
 	if not top then return end
+
+	-- a slider grabbed by mousepressed keeps following the pointer
+	if screens.dragging then
+		if love.mouse.isDown(1) and screens.dragging.screen == top then
+			set_slider_from(screens.dragging, rx)
+		else
+			screens.dragging = nil
+		end
+	end
 	-- clear hovers on other screens implicitly: only top screen is interactive
 	for _, c in ipairs(top.comps) do c.hover = false end
 	local hit = nil
@@ -303,11 +323,15 @@ function screens.mousemoved(x, y)
 		if top._hover_comp ~= hit then
 			local snd = hit.props.snd_over
 			if snd and snd ~= "!NONE" then
-				require("src.engine.audio").play_sound(snd)
+				require("src.engine.audio").play_ui_sound(snd)
 			end
 		end
 	end
 	top._hover_comp = hit
+end
+
+function screens.mousereleased(x, y, button)
+	if button == 1 then screens.dragging = nil end
 end
 
 function screens.mousepressed(x, y, button)
@@ -322,11 +346,16 @@ function screens.mousepressed(x, y, button)
 			if hit then
 				local snd = hit.props.snd_press
 				if snd and snd ~= "!NONE" then
-					require("src.engine.audio").play_sound(snd)
+					require("src.engine.audio").play_ui_sound(snd)
 				end
 				if hit.type == "Checkbox" then
 					local v = hit.props["checkbox.value"]
 					hit.props["checkbox.value"] = not (v == true or v == 1)
+				elseif hit.type == "Slider" then
+					-- sliders are dragged, so remember which one until the
+					-- button comes back up (see screens.mousereleased)
+					screens.dragging = hit
+					set_slider_from(hit, rx)
 				end
 				screens.call(top, "OnClick", hit.name)
 				-- clicks the script's OnClick ignores (Chapter_N, Quest_N —

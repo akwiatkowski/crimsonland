@@ -23,6 +23,13 @@ local paths = require("src.engine.paths")
 local fx = {}
 
 local GRAPH_PARAMS = { scale_graph = true, alpha_graph = true }
+-- `color` is this port's second addition to the DSL (after `bitmap_rect`):
+-- three values, r/g/b, multiplying the sprite. The pak's own effect files
+-- never needed it because each named a bitmap already painted the right
+-- colour, but the gameplay effects all draw off one sheet -- an ion blast and
+-- a rocket blast are the same fireball in different light -- so tinting is
+-- what saves painting a second sheet by hand.
+local COLOR_PARAMS = { color = true }
 -- Per layer. The UI's own emitters are small (1-100 particles), but the world
 -- layer now carries the gameplay effects too — a swarm coming apart is a lot of
 -- blood on top of the brass — so the cap has room for a busy fight before it
@@ -48,6 +55,8 @@ local function param_setter(emitter)
 			local graph = emitter[name] or {}
 			graph[#graph + 1] = { t = a or 0, v = (select(2, ...)) or 0 }
 			emitter[name] = graph
+		elseif COLOR_PARAMS[name] then
+			emitter[name] = { a or 1, (select(2, ...)) or 1, (select(3, ...)) or 1 }
 		elseif type(a) == "string" then
 			emitter[name] = a
 		else
@@ -126,7 +135,7 @@ local function sample(graph, t, default)
 	return graph[#graph].v
 end
 
-local function emit(e, x, y, rot, pool, fade, base_scale)
+local function emit(e, x, y, rot, pool, fade, base_scale, tint)
 	local n = math.floor(rand_range(e.num_parts, 1))
 	local image = e.bitmap and assets.image(e.bitmap)
 	if not image then return end
@@ -173,6 +182,9 @@ local function emit(e, x, y, rot, pool, fade, base_scale)
 			quad_h = qh,
 			base_scale = base_scale,
 			additive = e.blend_mode == "ADDITIVE",
+			-- a spawn-time tint beats the authored one, so one fireball file
+			-- can serve a rocket and an ion blast
+			color = tint or e.color,
 			x = px,
 			y = py,
 			dx = math.cos(move) * speed,
@@ -207,13 +219,15 @@ end
 --           trooper scene it was written for, visible litter in gameplay.
 --   scale = size and throw multiplier, for one effect serving several sizes
 --           (a rocket blast and a bursting creature are the same explosion)
+--   color = {r, g, b} overriding whatever the file authored, so the same
+--           fireball can burn orange for a rocket and blue for an ion blast
 function fx.spawn(path, x, y, rot, opts)
 	local emitters = fx.load(path)
 	if not emitters then return end
 	opts = opts or {}
 	local pool = pools[opts.layer or "screen"]
 	for _, e in ipairs(emitters) do
-		emit(e, x, y, rot or 0, pool, opts.fade, opts.scale)
+		emit(e, x, y, rot or 0, pool, opts.fade, opts.scale, opts.color)
 	end
 end
 
@@ -239,26 +253,50 @@ function fx.update(dt)
 end
 
 --- Draw one layer; the caller owns whatever transform it belongs in.
+--
+-- Two passes over the pool, normal-blended particles then additive ones,
+-- rather than one pass setting the blend mode per particle. LÖVE batches
+-- consecutive draws that share a texture and state, and a state change is
+-- what flushes the batch -- so alternating the blend mode particle by
+-- particle turned a pool of up to 1500 into up to 1500 submissions. Grouping
+-- also puts every glow over every splat, which is the right order anyway.
 function fx.draw(layer)
-	for _, p in ipairs(pools[layer or "screen"]) do
-		local t = p.age / p.life
-		local scale = sample(p.scale_graph, t, 1) * p.base_scale
-		local alpha = p.alpha * sample(p.alpha_graph, t, 1)
-		if p.fade and t > 1 - p.fade then alpha = alpha * (1 - t) / p.fade end
-		love.graphics.setBlendMode(p.additive and "add" or "alpha")
-		love.graphics.setColor(1, 1, 1, alpha)
-		if p.quad then
-			-- a quad addresses texels, so its origin and scale are in texels too
-			local s = scale * p.quad_scale
-			love.graphics.draw(p.image, p.quad, p.x, p.y, p.angle, s, s,
-				p.quad_w / 2, p.quad_h / 2)
-		else
-			love.graphics.draw(p.image, p.x, p.y, p.angle, scale, scale,
-				p.image:getWidth() / 2, p.image:getHeight() / 2)
-		end
-	end
+	local pool = pools[layer or "screen"]
+	love.graphics.setBlendMode("alpha")
+	fx.draw_pass(pool, false)
+	love.graphics.setBlendMode("add")
+	fx.draw_pass(pool, true)
 	love.graphics.setBlendMode("alpha")
 	love.graphics.setColor(1, 1, 1, 1)
+end
+
+--- One blend group of a pool. Split out of fx.draw so the two passes cannot
+-- drift apart.
+function fx.draw_pass(pool, additive)
+	for _, p in ipairs(pool) do
+		if (not p.additive) == (not additive) then
+			local t = p.age / p.life
+			local scale = sample(p.scale_graph, t, 1) * p.base_scale
+			local alpha = p.alpha * sample(p.alpha_graph, t, 1)
+			if p.fade and t > 1 - p.fade then alpha = alpha * (1 - t) / p.fade end
+			local c = p.color
+			if c then
+				love.graphics.setColor(c[1], c[2], c[3], alpha)
+			else
+				love.graphics.setColor(1, 1, 1, alpha)
+			end
+			if p.quad then
+				-- a quad addresses texels, so its origin and scale are in
+				-- texels too
+				local s = scale * p.quad_scale
+				love.graphics.draw(p.image, p.quad, p.x, p.y, p.angle, s, s,
+					p.quad_w / 2, p.quad_h / 2)
+			else
+				love.graphics.draw(p.image, p.x, p.y, p.angle, scale, scale,
+					p.image:getWidth() / 2, p.image:getHeight() / 2)
+			end
+		end
+	end
 end
 
 function fx.clear(layer)

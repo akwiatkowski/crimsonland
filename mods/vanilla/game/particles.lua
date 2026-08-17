@@ -38,8 +38,11 @@ end
 
 --- Rocket-class detonation. `radius` is the blast radius in world pixels; the
 -- effect is authored around 80 (a rocket), so smaller blasts scale down.
-function particles.explosion(x, y, radius)
-	spawn("mods/vanilla/fxs/explosion.lua", x, y, 0, (radius or 80) / 80)
+-- `color` tints the whole blast, which is how the energy weapons detonate in
+-- their own light without a second sheet of fireball art.
+function particles.explosion(x, y, radius, color)
+	fx.spawn("mods/vanilla/fxs/explosion.lua", x, y, 0,
+		{ layer = "world", scale = (radius or 80) / 80, color = color })
 end
 
 --- Small sparkle when a drop is picked up.

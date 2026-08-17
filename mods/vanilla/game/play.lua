@@ -207,6 +207,11 @@ local function init_session(mode, chapter, quest, terrain_override)
 	game.ebullets = {} -- creature projectiles (plasma shooter spiders)
 	game.drops = {}
 	game.effects = {} -- active timed powerups: id -> seconds left
+	game.hazes = {} -- blasts still bending the air over themselves
+	game.decals = {} -- blood waiting to be stamped into the ground
+	game.shake_t, game.shake_mag = 0, 0
+	game.shake_x, game.shake_y = 0, 0
+	game.flash_t, game.flash_amount = 0, 0
 	game.mods = perks.fresh_mods()
 	game.owned_perks = {}
 	game.perk_choices = nil
@@ -888,6 +893,9 @@ local function activate_powerup(game, pu)
 	audio.play_sound(pu.snd)
 	print(("[game] powerup: %s"):format(pu.id))
 	if pu.id == "NUKE" then
+		-- the whole field goes at once, and the frame should say so
+		game.flash(0.85, 1, 0.95, 0.85)
+		game.shake(12)
 		-- wipe everything alive; each death pays out normally
 		for _, c in ipairs(game.creatures) do
 			if not c.dying then
@@ -920,6 +928,14 @@ function damage_creature(game, c, dmg)
 		c.rot = c.fixed_rot
 			or math.atan2(game.player.y - c.y, game.player.x - c.x) + math.pi / 2
 		particles.death_burst(c.x, c.y, c.variant.scale)
+		-- what it emptied onto the ground, under where it came apart
+		for _ = 1, 3 do
+			game.blood_decal(
+				c.x + (love.math.random() - 0.5) * 26 * c.variant.scale,
+				c.y + (love.math.random() - 0.5) * 26 * c.variant.scale,
+				(0.7 + love.math.random() * 0.7) * c.variant.scale,
+				0.35 + love.math.random() * 0.3)
+		end
 		-- the parts creatures.xml says this creature is made of
 		gibs.spawn(c)
 		-- something killed while encased sheds its ice with the rest of it
@@ -933,6 +949,7 @@ function damage_creature(game, c, dmg)
 			st.dens = st.dens + 1
 		end
 		if c.is_boss then
+			game.shake(8)
 			game.bosses_alive = game.bosses_alive - 1
 			print("[game] boss down!")
 		end
@@ -958,11 +975,151 @@ function damage_creature(game, c, dmg)
 	end
 end
 
+-- ------------------------------------------------------------------ impact
+--
+-- What a hit does to the frame rather than to the world: the camera jolts, the
+-- screen flashes, the air over a blast bends. None of it touches gameplay --
+-- no hit-stop, deliberately. Freezing the game for a few frames on a kill
+-- reads as weight in a game with one enemy at a time; here twenty things die a
+-- second and it would stutter from start to finish.
+
+-- Seconds a jolt takes to die. Short: this is a punch, not a wobble.
+local SHAKE_TIME = 0.3
+-- Hard ceiling on the offset, in reference pixels. Past this the playfield
+-- stops reading as a camera and starts reading as a bug.
+local SHAKE_MAX = 14
+-- How long a blast keeps bending the air over it.
+local HAZE_TIME = 0.45
+
+--- Jolt the camera. `mag` is in reference pixels at the moment of the hit.
+function game.shake(mag)
+	game.shake_mag = math.min(SHAKE_MAX, math.max(game.shake_mag or 0, mag))
+	game.shake_t = SHAKE_TIME
+end
+
+--- Wash the frame towards a colour and fade back out of it.
+function game.flash(amount, r, g, b)
+	if (game.flash_amount or 0) > amount then return end
+	game.flash_amount = amount
+	game.flash_t = 0.35
+	game.flash_dur = 0.35
+	game.flash_rgb = { r or 1, g or 1, b or 1 }
+end
+
+--- Bend the air over a point in the world for a moment.
+function game.add_haze(x, y, radius)
+	local list = game.hazes
+	if not list then return end
+	list[#list + 1] = { x = x, y = y, radius = radius, t = 0 }
+end
+
+local function update_impact(game, dt)
+	if game.shake_t and game.shake_t > 0 then
+		game.shake_t = game.shake_t - dt
+		-- squared falloff, so it lands hard and settles fast
+		local k = math.max(0, game.shake_t / SHAKE_TIME)
+		local m = (game.shake_mag or 0) * k * k
+		-- one offset per frame, not one per call: game.camera() is read by the
+		-- draw and again by the crosshair, and they have to agree
+		game.shake_x = (love.math.random() * 2 - 1) * m
+		game.shake_y = (love.math.random() * 2 - 1) * m
+	else
+		game.shake_x, game.shake_y = 0, 0
+		-- and the magnitude with it: game.shake keeps the loudest request so a
+		-- small jolt cannot cut a big one short, which without this reset also
+		-- meant every later jolt inherited the largest one the run ever had
+		game.shake_mag = 0
+	end
+
+	if game.flash_t and game.flash_t > 0 then
+		game.flash_t = game.flash_t - dt
+	else
+		game.flash_amount = 0 -- same reason as the shake above
+	end
+
+	for i = #game.hazes, 1, -1 do
+		local h = game.hazes[i]
+		h.t = h.t + dt
+		if h.t >= HAZE_TIME then table.remove(game.hazes, i) end
+	end
+end
+
+-- What colour a blast burns. The fireball art is painted for ordnance, so a
+-- rocket takes it as it is; the energy weapons tint it towards their own bolt
+-- rather than asking for a second sheet of hand-painted fire.
+local BLAST_TINT = {
+	plasma = { 0.55, 0.8, 1.0 },
+	ion = { 0.6, 1.0, 0.65 },
+	pulse = { 1.0, 0.9, 0.5 },
+}
+
+-- ------------------------------------------------------------------ decals
+--
+-- Blood that stays. The spray off a hit is particles and particles fade, so a
+-- field fought over for a minute looked exactly like a clean one -- and the
+-- floor going red as a wave comes apart is the thing Crimsonland is
+-- remembered for. A share of the hits stamp a splat into the terrain canvas,
+-- where the corpses and the body parts already go.
+--
+-- Stamps queue and flush once a frame: stamping at the call site would switch
+-- render target once per round of a minigun.
+
+local DECAL_SPLAT = { 65, 1, 30, 30 } -- the splat on game/particles.tga
+local DECAL_HIT_CHANCE = 0.35
+-- A wave dying at once is a lot of stamps; past this they are dropped rather
+-- than queued, because the ground is already red by then.
+local DECAL_MAX_QUEUED = 64
+
+local decal_quad, decal_quad_scale, decal_qw, decal_qh
+
+local function decal_sprite()
+	local img = assets.image("game/particles.tga")
+	if not img then return nil end
+	if not decal_quad then
+		local r = DECAL_SPLAT
+		decal_quad, decal_quad_scale = assets.quad(img, r[1], r[2], r[3], r[4])
+		decal_qw, decal_qh = select(3, decal_quad:getViewport())
+	end
+	return img
+end
+
+--- Queue a stain at a point in the world.
+function game.blood_decal(x, y, scale, alpha)
+	local q = game.decals
+	if not q or #q >= DECAL_MAX_QUEUED then return end
+	q[#q + 1] = {
+		x = x, y = y,
+		scale = scale or 1,
+		alpha = alpha or 0.5,
+		rot = love.math.random() * math.pi * 2,
+	}
+end
+
+local function flush_decals(game)
+	local q = game.decals
+	if not q or #q == 0 then return end
+	local img = decal_sprite()
+	if img then
+		love.graphics.setCanvas(game.terrain)
+		for _, d in ipairs(q) do
+			love.graphics.setColor(1, 1, 1, d.alpha)
+			local sc = d.scale * decal_quad_scale
+			love.graphics.draw(img, decal_quad, d.x, d.y, d.rot, sc, sc,
+				decal_qw / 2, decal_qh / 2)
+		end
+		love.graphics.setColor(1, 1, 1, 1)
+		love.graphics.setCanvas()
+	end
+	for i = #q, 1, -1 do q[i] = nil end
+end
+
 --- Rocket-class detonation: area damage with linear falloff to the edge.
-local function explode(game, x, y, base_damage)
+local function explode(game, x, y, base_damage, art)
 	local radius = 80
-	particles.explosion(x, y, radius)
+	particles.explosion(x, y, radius, art and BLAST_TINT[art])
 	audio.play_sound("sfx/explosion_medium")
+	game.shake(5)
+	game.add_haze(x, y, radius)
 	for _, c in ipairs(game.creatures) do
 		local ddx, ddy = c.x - x, c.y - y
 		local dist = math.sqrt(ddx * ddx + ddy * ddy)
@@ -1025,6 +1182,8 @@ function game.on_attacked(raw)
 	if taken <= 0 then return false end
 
 	p.hp = p.hp - raw * taken
+	-- being bitten has to be felt without looking at the health pie
+	game.shake(2 + math.min(5, raw * taken * 0.3))
 	return true
 end
 
@@ -1042,6 +1201,8 @@ end
 
 --- Breathing Room: "the killing of every single creature on the screen"
 function game.kill_everything()
+	game.flash(0.6, 1, 0.9, 0.8)
+	game.shake(9)
 	for _, c in ipairs(game.creatures) do
 		if not c.dying then
 			particles.explosion(c.x, c.y, 50)
@@ -1153,7 +1314,7 @@ local function update_bullets(game, dt)
 		local dead = b.dist_left <= 0
 		-- rockets that reach max range detonate instead of fizzling
 		if dead and b.explosive then
-			explode(game, b.x, b.y, b.damage)
+			explode(game, b.x, b.y, b.damage, b.art)
 		end
 		-- collide with creatures (circle radius ~16*scale)
 		if not dead then
@@ -1165,9 +1326,14 @@ local function update_bullets(game, dt)
 						dead = true
 						game.hits = game.hits + 1
 						if b.explosive then
-							explode(game, b.x, b.y, b.damage)
+							explode(game, b.x, b.y, b.damage, b.art)
 						else
 							particles.blood(b.x, b.y, math.atan2(b.dy, b.dx))
+							if love.math.random() < DECAL_HIT_CHANCE then
+								game.blood_decal(b.x, b.y,
+									0.5 + love.math.random() * 0.4,
+									0.3 + love.math.random() * 0.25)
+							end
 							if game.mods.poison > 0 then
 								c.poison_t = 4 -- refreshed on every hit
 							end
@@ -1456,6 +1622,8 @@ function game.update(dt)
 	update_drops(game, dt)
 	-- parts in flight settle into the ground they land on
 	gibs.update(dt, game.terrain)
+	update_impact(game, dt)
+	flush_decals(game)
 
 	-- boss entrance at 60% of the kill goal
 	if game.boss_pending > 0 and game.kills_goal
@@ -1595,6 +1763,11 @@ function game.camera()
 	local p = game.player
 	local cx = math.max(0, math.min(WORLD_W - SCREEN_W, p.x - SCREEN_W / 2))
 	local cy = math.max(0, math.min(WORLD_H - SCREEN_H, p.y - SCREEN_H / 2))
+	-- The jolt is added and then clamped again: at the edges of the world it
+	-- gets damped on that side rather than pulling the view off the baked
+	-- ground and showing the black behind it.
+	cx = math.max(0, math.min(WORLD_W - SCREEN_W, cx + (game.shake_x or 0)))
+	cy = math.max(0, math.min(WORLD_H - SCREEN_H, cy + (game.shake_y or 0)))
 	return cx, cy
 end
 
@@ -1693,6 +1866,72 @@ local function draw_creature(game, c)
 	end
 end
 
+-- How much glow the frame carries during play. The additive effects -- muzzle
+-- flash, explosions, plasma, the level-up ring -- are drawn to be bright, and
+-- this is what makes them read as light falling on the field rather than as
+-- pale sprites sitting on it. Low: the art is 2003 hand-painted work and it
+-- does not want to be a bloom demo.
+local BLOOM = 0.30
+
+--- Ask the engine's post pass for whatever this frame's state calls for.
+--
+-- Grading the finished canvas grades the UI drawn on it too, so this only runs
+-- when the game owns the whole frame: not under a menu, and never in the
+-- attract demo, where a frozen field would turn the main menu blue.
+local function grade_frame(game, camx, camy)
+	local screens = require("src.engine.screens")
+	local postfx = require("src.engine.postfx")
+	local top = screens.top()
+	if not top or top.name ~= "GameCrimsonland" then return end
+
+	local g = { bloom = BLOOM }
+
+	-- The field is frozen solid: cold light, and the colour drains with it.
+	if game.effects.FREEZE then
+		g.tint = { 0.55, 0.78, 1.25 }
+		g.tint_amount = 0.55
+		g.saturation = 0.7
+	end
+
+	-- Reflex Boost slows everything but the player. Draining some colour and
+	-- closing the edges in is what makes that read as *their* perception
+	-- changing rather than the game running badly.
+	--
+	-- Only the powerup, which runs for eight seconds -- not the Reflex Boosted
+	-- perk, which slows time for the rest of the run and would therefore grade
+	-- the rest of the run. A permanent vignette does not read as a power, it
+	-- reads as a broken renderer.
+	--
+	-- 0.72 rather than the 0.45 this started at: at 0.45 the world drained,
+	-- but so did the fireballs, and an explosion that comes out grey is a
+	-- worse trade than a slightly less obvious slow-motion.
+	if game.effects.REFLEX_BOOST then
+		g.saturation = math.min(g.saturation or 1, 0.72)
+		g.vignette = 0.3
+	end
+
+	if (game.flash_t or 0) > 0 and game.flash_dur then
+		local k = game.flash_t / game.flash_dur
+		g.flash = (game.flash_amount or 0) * k * k
+		g.flash_color = game.flash_rgb
+	end
+
+	postfx.set(g)
+
+	-- Blasts bend the air over themselves. World coordinates come through the
+	-- camera first, because the post pass works on the finished screen.
+	for _, h in ipairs(game.hazes) do
+		local k = 1 - h.t / HAZE_TIME
+		postfx.add_haze(h.x - camx, h.y - camy, h.radius * 2.2, k)
+	end
+	-- a flamethrower's own barrel shimmer, while it is actually burning
+	local p = game.player
+	if p.weapon and FLAME[p.weapon.id] and p.muzzle > 0 then
+		postfx.add_haze(p.x - camx + math.cos(p.angle) * 40,
+			p.y - camy + math.sin(p.angle) * 40, 70, 0.7)
+	end
+end
+
 -- game/projs.tga is the projectile sheet the original drew rounds from: a
 -- 128x128 image with four sprites on it, located by scanning it for opaque
 -- regions. Which weapon wears which is data (data.lua's projectile_art
@@ -1735,6 +1974,49 @@ local function draw_proj(name, x, y, rot, scale, r, g, b, a, additive)
 	return true
 end
 
+-- Light on the ground.
+--
+-- Not a lighting system: the same additive glow sprite the energy bolts are
+-- drawn with, laid on the terrain under whatever is emitting, before anything
+-- alive is drawn over it. That is enough for a muzzle flash to light the grass
+-- in front of the player and a blast to wash the field around it -- which is
+-- what the additive sprites above the ground were missing. They were bright
+-- against the dark, but nothing under them ever got brighter.
+local function draw_lights(game)
+	local p = game.player
+
+	if p.hp > 0 and p.muzzle > 0 then
+		local k = math.min(1, p.muzzle / 0.05)
+		draw_proj("glow", p.x + math.cos(p.angle) * 30, p.y + math.sin(p.angle) * 30,
+			0, 3.4, 1, 0.85, 0.5, 0.45 * k, true)
+	end
+
+	-- blasts: the light goes out faster than the smoke does
+	for _, h in ipairs(game.hazes) do
+		local k = 1 - h.t / HAZE_TIME
+		if k > 0 then
+			draw_proj("glow", h.x, h.y, 0, (h.radius / 22) * 3.2,
+				1, 0.72, 0.38, 0.7 * k * k, true)
+		end
+	end
+
+	for _, b in ipairs(game.bullets) do
+		if b.flame or b.fire then
+			draw_proj("glow", b.x, b.y, 0, 1.8, 1, 0.5, 0.15, 0.22, true)
+		elseif b.art == "plasma" then
+			draw_proj("glow", b.x, b.y, 0, 1.6, 0.5, 0.75, 1, 0.2, true)
+		elseif b.art == "ion" then
+			draw_proj("glow", b.x, b.y, 0, 1.6, 0.55, 1, 0.6, 0.2, true)
+		elseif b.art == "pulse" then
+			draw_proj("glow", b.x, b.y, 0, 2.0, 1, 0.9, 0.5, 0.22, true)
+		end
+	end
+
+	for _, b in ipairs(game.ebullets) do
+		draw_proj("glow", b.x, b.y, 0, 1.5, 0.3, 1, 0.4, 0.2, true)
+	end
+end
+
 function game.draw()
 	-- the crosshair replaces the OS cursor while a session runs; the demo is
 	-- not being played by the person holding the mouse, so they keep theirs
@@ -1759,6 +2041,9 @@ function game.draw()
 	-- terrain
 	love.graphics.setColor(1, 1, 1, 1)
 	love.graphics.draw(game.terrain, 0, 0)
+
+	-- what the bright things are throwing onto it
+	draw_lights(game)
 
 	-- powerup drops (under everything alive)
 	local base_img = assets.image("powerups/base.png")
@@ -1893,6 +2178,8 @@ function game.draw()
 		love.graphics.setColor(1, 1, 1, 1)
 		return -- no HUD: it is a backdrop, not a session the player owns
 	end
+
+	grade_frame(game, camx, camy)
 
 	-- HUD (screen space): original 2014 art — health pie, crosshair with
 	-- reload sweep, XP strip, effect timers (game/hud.lua)

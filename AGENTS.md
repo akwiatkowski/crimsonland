@@ -155,10 +155,29 @@ NX_SetCursor NX_GetInterface NX_GetTime NX_FileExists NX_Popup NX_CallExtension`
   aim_circle/dot crosshair with reload sweep, progress-bar XP strip,
   levelup-ring, white-vignette low-hp breathing); bone/blood/brass/toxic
   palette; fonts via engine font module (small/medium/ammo.mft)
+- Impact layer in `play.lua` — camera shake (one offset per frame, because
+  `game.camera()` is read by the draw and again by the crosshair and they must
+  agree), the flash, heat-haze sources, and blood decals stamped into the
+  terrain canvas. Deliberately NO hit-stop: twenty things die a second here
 - `save.lua` — platform state + progress to LÖVE save dir (identity
   crimsonland-mac), sandboxed load, flushed on quit/outcomes
 - Quest kill-count/spawn tables are approximations — original quest defs were
   compiled into prog.dll; only `custom-quests/` ships as XML
+
+## Post-processing (src/engine/postfx.lua)
+
+- Runs on the finished 960x640 canvas at blit time: grade (tint through
+  luminance, saturation, vignette, flash), bloom (quarter-size bright pass +
+  separable blur, added back), heat haze (up to 4 UV-displacement sources).
+- The game asks per frame via `postfx.set{...}` / `postfx.add_haze(...)` and
+  the engine clears it after the blit, so not asking means a plain 1:1 copy —
+  menus pay nothing.
+- Grading the finished canvas grades the UI on it too, so `grade_frame` only
+  runs when the game owns the whole frame (top screen is GameCrimsonland,
+  never in the attract demo).
+- Tint is `mix(rgb, vec3(luma) * tint, amount)`, NOT `rgb * tint`: multiplying
+  a brown field by a cold blue only darkens it, because there is no blue in
+  the ground to bring up.
 
 ## Test harness (src/test/)
 
@@ -170,6 +189,14 @@ NX_SetCursor NX_GetInterface NX_GetTime NX_FileExists NX_Popup NX_CallExtension`
   time list. New test = new scenario file, no harness/game edits
 - Output: screen stack, game state line, clickable rects, ASCII canvas render —
   all teed to /tmp/crimsonland_port.log
+- TWO image dumps per capture, and the difference matters: `capture-NN.png` is
+  the canvas BEFORE the blit, so nothing `postfx` does (grade, bloom, haze) is
+  in it; `screen-NN.png` is the real backbuffer, the only place those appear.
+  Comparing two canvas captures proves nothing about any post effect
+- A backbuffer shot is resolved at the end of the next `present()`, which is a
+  whole 30-update batch away — half a second of game time, by which point a
+  fireball is over. `screenshot_pending` drops the next batch to a single step
+  so the shot lands beside the canvas dump instead of half a second past it
 
 ## Conventions
 

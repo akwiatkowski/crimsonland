@@ -89,6 +89,16 @@ Done:
       terrains — Rush's beach, Blitz's roads and landing pad — which every
       endless mode used to replace with chapter 1's grass
 
+- [x] Feel and light: camera shake, a full-screen flash, blood that stays on
+      the ground, and additive light pooling under muzzle flashes, blasts and
+      energy bolts
+- [x] A post pass on the finished frame (`src/engine/postfx.lua`): colour
+      grading so a frozen field goes cold and Reflex Boost drains the world,
+      bloom so the additive effects read as light, and a heat shimmer over
+      explosions. The original engine shipped two shaders — a textured quad
+      and an untextured one — so this is the one place the port deliberately
+      goes past the 2014 build
+
 Next:
 
 - [ ] Gamepad support (`joystick` is enabled but unused)

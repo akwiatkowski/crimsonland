@@ -46,6 +46,12 @@ end
 
 local ramp = " .:-=+*#%@"
 local shot_idx = 0
+-- A backbuffer screenshot is taken at the end of the NEXT drawn frame, and a
+-- drawn frame is a whole batch of updates away (STEPS_PER_FRAME below) -- half
+-- a second of game time, by which point a fireball or a heat shimmer is long
+-- over. Set when a shot is outstanding so the loop runs a single step before
+-- presenting again, which lands it beside the canvas dump instead.
+local screenshot_pending = false
 
 --- Dump screen stack, game state, clickable rects and an ASCII rendering of
 -- the reference canvas — everything needed to verify behavior from a log.
@@ -99,6 +105,16 @@ function harness.capture()
 	local shot = string.format("capture-%02d.png", shot_idx)
 	data:encode("png", shot)
 	print(("  frame -> %s%s"):format(love.filesystem.getSaveDirectory(), "/" .. shot))
+
+	-- The canvas is the frame BEFORE it reaches the window, so nothing the
+	-- post pass does to it is in that PNG — grade, bloom and heat shimmer are
+	-- all invisible to a canvas capture, and comparing two of them proves
+	-- nothing about any of them. This one is the actual backbuffer, taken at
+	-- the end of the next draw, which is the only way to see them.
+	local screen = string.format("screen-%02d.png", shot_idx)
+	love.graphics.captureScreenshot(screen)
+	screenshot_pending = true
+	print(("  window -> %s%s"):format(love.filesystem.getSaveDirectory(), "/" .. screen))
 
 	local cols, rows = 96, 32
 	local out = { string.format("=== canvas capture %dx%d ===", W, H) }
@@ -216,7 +232,11 @@ function harness.install(scenario_name)
 				love.handlers[name](a, b, c, d, e, f)
 			end
 
-			for _ = 1, STEPS_PER_FRAME do
+			-- one step while a screenshot is outstanding, so the frame it is
+			-- taken from is the one that was just captured rather than half a
+			-- second of game time past it
+			local steps = screenshot_pending and 1 or STEPS_PER_FRAME
+			for _ = 1, steps do
 				love.update(FIXED_DT)
 				-- a capture wants a fresh canvas, and a finished scenario has
 				-- nothing left to simulate: both end the batch early
@@ -228,6 +248,8 @@ function harness.install(scenario_name)
 				love.graphics.clear(love.graphics.getBackgroundColor())
 				love.draw()
 				love.graphics.present()
+				-- present() is where an outstanding screenshot is resolved
+				screenshot_pending = false
 			end
 
 			if capture_due then

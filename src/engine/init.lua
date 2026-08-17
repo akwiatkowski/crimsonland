@@ -13,6 +13,7 @@ local fx = require("src.engine.fx")
 local mod = require("src.engine.mod")
 local nx = require("src.engine.nx")
 local paths = require("src.engine.paths")
+local postfx = require("src.engine.postfx")
 local platform = require("src.engine.platform")
 local screens = require("src.engine.screens")
 local timeline = require("src.engine.timeline")
@@ -736,6 +737,7 @@ function engine.start()
 		timeline.update(dt)
 		screens.update(dt)
 		fx.update(dt)
+		postfx.update(dt)
 	end
 
 	love.draw = function()
@@ -751,7 +753,12 @@ function engine.start()
 		fx.draw() -- screen-space emitters (menu shell casings, unlock bursts)
 		love.graphics.setCanvas()
 		love.graphics.setColor(1, 1, 1, 1)
-		love.graphics.draw(canvas, canvas_ox, canvas_oy, 0, canvas_scale, canvas_scale)
+		-- whatever drew this frame may have asked for a grade, a glow or a
+		-- shimmer on the way out; with nothing asked for this is the same
+		-- one-to-one blit it has always been
+		postfx.draw(canvas, canvas_ox, canvas_oy, canvas_scale,
+			screens.WIDTH, screens.HEIGHT)
+		postfx.frame_done()
 	end
 
 	love.resize = compute_viewport

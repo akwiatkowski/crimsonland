@@ -227,7 +227,11 @@ function fx.clear(layer)
 	end
 end
 
-function fx.count()
+--- Live particle count, for one layer or (with no argument) both. The split
+-- matters to anything watching a UI effect while a game runs behind it — the
+-- attract-mode menu is exactly that.
+function fx.count(layer)
+	if layer then return #pools[layer] end
 	return #pools.screen + #pools.world
 end
 

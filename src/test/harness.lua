@@ -63,7 +63,10 @@ function harness.capture()
 	end
 
 	local fx = require("src.engine.fx")
-	if fx.count() > 0 then print(("  fx particles=%d"):format(fx.count())) end
+	if fx.count() > 0 then
+		print(("  fx particles=%d screen=%d world=%d"):format(
+			fx.count(), fx.count("screen"), fx.count("world")))
+	end
 
 	local top = screens.top()
 	if top then

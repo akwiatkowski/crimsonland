@@ -11,6 +11,7 @@
 
 local assets = require("src.engine.assets")
 local font = require("src.engine.font")
+local fx = require("src.engine.fx")
 
 local comps = {}
 
@@ -113,12 +114,28 @@ function comps.set(comp, key, values)
 end
 
 function comps.get(comp, key)
+	-- "static_position" is a comp's resolved place on the screen rather than
+	-- the parent-normalized "position" it was authored with. Nothing stores it:
+	-- it is how a layout hands a coordinate to something living outside the comp
+	-- tree, which is how trooper_scene-events finds its two shell emitters.
+	if key == "static_position.x" or key == "static_position.y" then
+		local x, y = comps.screen_rect(comp)
+		return key:sub(-1) == "x" and x or y
+	end
 	local v = comp.props[key]
 	if key == "visible" or key == "active" then
 		return v == true or v == 1
 	end
 	return v
 end
+
+--- Truthiness the way the original scripts write it: `1`/`true` mean on, and
+-- `0` means off — which plain Lua would call true.
+local function flag(comp, key)
+	local v = comp.props[key]
+	return v == true or v == 1
+end
+comps.flag = flag
 
 -- numeric scalar prop with default
 local function num(comp, key, default)
@@ -447,6 +464,48 @@ function comps.draw_listbox(comp, w, h)
 		end
 		font.draw(fnt, tostring(items[index]), pad_l, y,
 			index == selected and { 1, 1, 1, 1 } or { 0.72, 0.7, 0.66, 1 })
+	end
+end
+
+-- ---------------------------------------------------------------- emitters
+
+--- Emitter: a place in the layout that plays a particle effect.
+--
+-- It draws nothing itself. `emitter.fx` names an fxs/ file, `emitter.emitting`
+-- turns it on, and it fires one burst every `emitter.time_interval` at its own
+-- resolved position — so a screen can attach an effect by declaring it where it
+-- belongs instead of computing a coordinate at the call site.
+--
+-- The pak's own emitters (trooper_scene, the PartPool on the unlock and chapter
+-- screens) leave `emitter.fx` unset and are spawned from script instead, so
+-- this is dormant in vanilla until something sets the property.
+function comps.update_emitter(comp, dt)
+	local path = comp.props["emitter.fx"]
+	if type(path) ~= "string" or not flag(comp, "emitter.emitting") then
+		comp.emit_timer = nil -- so re-enabling it starts a fresh interval
+		return
+	end
+
+	local interval = math.max(1 / 60, num(comp, "emitter.time_interval", 0.3))
+	local x, y = comps.screen_rect(comp)
+
+	if comp.emit_timer == nil then
+		comp.emit_timer = 0
+		-- `initial_simulation_time` asks for an emitter that already looks
+		-- established when the screen appears. We fire the bursts it implies
+		-- instead of replaying them into the past: the particles come out new
+		-- rather than part-aged, which for effects as short as the pak's reads
+		-- the same. (Nothing shipped sets it above 0, hence the modest cap.)
+		local pre = num(comp, "emitter.initial_simulation_time", 0)
+		for _ = 1, math.min(8, math.floor(pre / interval)) do
+			fx.spawn(path, x, y, 0)
+		end
+	end
+
+	comp.emit_timer = comp.emit_timer - dt
+	while comp.emit_timer <= 0 do
+		fx.spawn(path, x, y, 0)
+		comp.emit_timer = comp.emit_timer + interval
 	end
 end
 

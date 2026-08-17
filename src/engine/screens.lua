@@ -250,6 +250,15 @@ function screens.update(dt)
 			end
 		end
 	end
+
+	-- Comps with a life of their own. This runs after every OnUpdate above,
+	-- because an emitter reads its own resolved position and a script may have
+	-- just moved the parent it hangs from.
+	for _, s in ipairs(screens.stack) do
+		for _, c in ipairs(s.comps) do
+			if c.type == "Emitter" then comps.update_emitter(c, dt) end
+		end
+	end
 end
 
 function screens.draw()

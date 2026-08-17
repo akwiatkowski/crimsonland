@@ -46,7 +46,6 @@ function ai.controller()
 
 	return function(game)
 		local p = game.player
-		local world = game.WORLD
 
 		local target, dist = nearest(game.creatures, p.x, p.y, ENGAGE)
 		local threat, threat_d = nearest(game.creatures, p.x, p.y, COMFORT)
@@ -94,8 +93,10 @@ function ai.controller()
 		end
 
 		-- edges: the world is bounded, and a cornered AI reads as a stuck one
-		if p.x < EDGE then dx = dx + 1 elseif p.x > world - EDGE then dx = dx - 1 end
-		if p.y < EDGE then dy = dy + 1 elseif p.y > world - EDGE then dy = dy - 1 end
+		if p.x < EDGE then dx = dx + 1
+		elseif p.x > game.WORLD_W - EDGE then dx = dx - 1 end
+		if p.y < EDGE then dy = dy + 1
+		elseif p.y > game.WORLD_H - EDGE then dy = dy - 1 end
 
 		local clip = game.clip_size and game.clip_size() or 0
 		return {

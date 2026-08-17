@@ -19,8 +19,11 @@ local game = {}
 
 game.active = false
 
-local WORLD = 2048 -- world size in pixels (square)
-game.WORLD = WORLD -- anything steering the player needs the bounds too
+-- Playfield size. The pak documents it in the custom-quest format's own
+-- comments ("The game area is 0..1820" / "0..1024"), which is also why the
+-- spawn coordinates in custom-quests/myset/*.xml stay inside that box.
+local WORLD_W, WORLD_H = 1820, 1024
+game.WORLD_W, game.WORLD_H = WORLD_W, WORLD_H
 local SCREEN_W, SCREEN_H = 960, 640
 
 -- unit conversions (original engine units -> pixels; tuned by feel —
@@ -82,7 +85,7 @@ game.POWERUPS = POWERUPS -- the HUD reads icons/durations for effect timers
 local function bake_terrain(chapter_id)
 	local ops = data.terrains[chapter_id] or data.terrains.CHAPTER_1
 	local rng = love.math.newRandomGenerator(12345)
-	local canvas = love.graphics.newCanvas(WORLD, WORLD)
+	local canvas = love.graphics.newCanvas(WORLD_W, WORLD_H)
 	love.graphics.setCanvas(canvas)
 	love.graphics.clear(0.1, 0.1, 0.08, 1)
 	for _, op in ipairs(ops or {}) do
@@ -98,9 +101,9 @@ local function bake_terrain(chapter_id)
 				local stepx = img:getWidth() * spacing * scale
 				local stepy = img:getHeight() * spacing * scale
 				local y = 0
-				while y < WORLD do
+				while y < WORLD_H do
 					local x = 0
-					while x < WORLD do
+					while x < WORLD_W do
 						love.graphics.draw(img, x, y, 0, scale, scale)
 						x = x + stepx
 					end
@@ -113,8 +116,8 @@ local function bake_terrain(chapter_id)
 				local n = tonumber(op.num_splashes) or 10
 				love.graphics.setColor(1, 1, 1, tonumber(op.alpha) or 1)
 				for _ = 1, n do
-					local x = rng:random() * WORLD
-					local y = rng:random() * WORLD
+					local x = rng:random() * WORLD_W
+					local y = rng:random() * WORLD_H
 					local rot = rng:random() * math.pi * 2
 					love.graphics.draw(img, x, y, rot, 1, 1,
 						img:getWidth() / 2, img:getHeight() / 2)
@@ -136,8 +139,8 @@ local function init_session(terrain_chapter)
 	game.terrain = bake_terrain("CHAPTER_" .. terrain_chapter)
 
 	game.player = {
-		x = WORLD / 2,
-		y = WORLD / 2,
+		x = WORLD_W / 2,
+		y = WORLD_H / 2,
 		angle = 0,
 		hp = 100,
 		max_hp = 100,
@@ -408,8 +411,8 @@ local function spawn_creature(game, boss_var)
 	-- spawn on a ring around the player, clamped into the world
 	local ang = love.math.random() * math.pi * 2
 	local dist = 550 + love.math.random() * 300
-	local x = math.max(32, math.min(WORLD - 32, game.player.x + math.cos(ang) * dist))
-	local y = math.max(32, math.min(WORLD - 32, game.player.y + math.sin(ang) * dist))
+	local x = math.max(32, math.min(WORLD_W - 32, game.player.x + math.cos(ang) * dist))
+	local y = math.max(32, math.min(WORLD_H - 32, game.player.y + math.sin(ang) * dist))
 
 	add_creature(game, variant, x, y, boss_var and true or nil)
 	if boss_var then
@@ -466,8 +469,8 @@ local function update_field_spawns(game, dt)
 	if game.field_spawn_cd > 0 then return end
 	local ang = love.math.random() * math.pi * 2
 	local dist = 120 + love.math.random() * 260
-	local x = math.max(32, math.min(WORLD - 32, game.player.x + math.cos(ang) * dist))
-	local y = math.max(32, math.min(WORLD - 32, game.player.y + math.sin(ang) * dist))
+	local x = math.max(32, math.min(WORLD_W - 32, game.player.x + math.cos(ang) * dist))
+	local y = math.max(32, math.min(WORLD_H - 32, game.player.y + math.sin(ang) * dist))
 	if game.mode == "nukefism" then
 		game.field_spawn_cd = 3.5
 		local pu = POWERUPS[love.math.random(#POWERUPS)]
@@ -550,8 +553,8 @@ local function update_player(game, dt)
 		local len = math.sqrt(dx * dx + dy * dy)
 		local speed = p.speed * game.mods.speed
 			* (game.effects.SPEED and 1.5 or 1)
-		p.x = math.max(16, math.min(WORLD - 16, p.x + dx / len * speed * dt))
-		p.y = math.max(16, math.min(WORLD - 16, p.y + dy / len * speed * dt))
+		p.x = math.max(16, math.min(WORLD_W - 16, p.x + dx / len * speed * dt))
+		p.y = math.max(16, math.min(WORLD_H - 16, p.y + dy / len * speed * dt))
 		p.anim_t = p.anim_t + dt
 	end
 
@@ -869,8 +872,8 @@ local function update_creatures(game, dt)
 					c.wander_t = 1 + love.math.random() * 2
 					c.wander_a = love.math.random() * math.pi * 2
 				end
-				c.x = math.max(32, math.min(WORLD - 32, c.x + math.cos(c.wander_a) * speed * dt))
-				c.y = math.max(32, math.min(WORLD - 32, c.y + math.sin(c.wander_a) * speed * dt))
+				c.x = math.max(32, math.min(WORLD_W - 32, c.x + math.cos(c.wander_a) * speed * dt))
+				c.y = math.max(32, math.min(WORLD_H - 32, c.y + math.sin(c.wander_a) * speed * dt))
 			elseif dist > 1 and not (c.fire_cd and dist < SHOOTER_STANDOFF) then
 				c.x = c.x + dx / dist * speed * dt
 				c.y = c.y + dy / dist * speed * dt
@@ -910,8 +913,8 @@ local function update_creatures(game, dt)
 					if mv then
 						local a = love.math.random() * math.pi * 2
 						add_creature(game, mv,
-							math.max(32, math.min(WORLD - 32, c.x + math.cos(a) * 30)),
-							math.max(32, math.min(WORLD - 32, c.y + math.sin(a) * 30)))
+							math.max(32, math.min(WORLD_W - 32, c.x + math.cos(a) * 30)),
+							math.max(32, math.min(WORLD_H - 32, c.y + math.sin(a) * 30)))
 					end
 				end
 			end
@@ -1133,8 +1136,8 @@ end
 
 function game.camera()
 	local p = game.player
-	local cx = math.max(0, math.min(WORLD - SCREEN_W, p.x - SCREEN_W / 2))
-	local cy = math.max(0, math.min(WORLD - SCREEN_H, p.y - SCREEN_H / 2))
+	local cx = math.max(0, math.min(WORLD_W - SCREEN_W, p.x - SCREEN_W / 2))
+	local cy = math.max(0, math.min(WORLD_H - SCREEN_H, p.y - SCREEN_H / 2))
 	return cx, cy
 end
 

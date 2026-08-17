@@ -37,6 +37,11 @@ function harness.key(k)
 	screens.keypressed(k)
 end
 
+--- Type, the way love.textinput delivers it: characters, not key names.
+function harness.text(s)
+	screens.textinput(s)
+end
+
 -- --------------------------------------------------------------- captures
 
 local ramp = " .:-=+*#%@"
@@ -178,6 +183,7 @@ function harness.install(scenario_name)
 			step_idx = step_idx + 1
 			if step.click then harness.click(step.click) end
 			if step.key then harness.key(step.key) end
+			if step.text then harness.text(step.text) end
 			-- escape hatch for subsystems a player cannot reach from input
 			-- alone (the game polls love.mouse.isDown, which cannot be faked)
 			if step.run then step.run() end

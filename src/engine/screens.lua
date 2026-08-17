@@ -215,6 +215,12 @@ end
 
 -- ------------------------------------------------------------ update/draw
 
+--- Keyboard focus must not outlive the screen that owns it: the comp is about
+-- to be dropped, and a caret blinking into a dead table is the least of it.
+local function drop_focus(s)
+	if comps.focused and comps.focused.screen == s then comps.set_focus(nil) end
+end
+
 function screens.update(dt)
 	-- transition phases + timers + OnUpdate
 	for i = #screens.stack, 1, -1 do
@@ -224,6 +230,7 @@ function screens.update(dt)
 			if s.leaving then
 				-- internal screens have no transition: remove immediately
 				screens.call(s, "OnLeave")
+				drop_focus(s)
 				table.remove(screens.stack, i)
 			else
 				s.phase = 0
@@ -238,6 +245,7 @@ function screens.update(dt)
 			screens.call(s, "OnUpdate", dt)
 			if s.phase <= 0 then
 				screens.call(s, "OnLeave")
+				drop_focus(s)
 				table.remove(screens.stack, i)
 			end
 		else
@@ -259,6 +267,7 @@ function screens.update(dt)
 			if c.type == "Emitter" then comps.update_emitter(c, dt) end
 		end
 	end
+	comps.update_blink(dt)
 end
 
 function screens.draw()
@@ -302,9 +311,16 @@ local KEYMAP = {
 }
 
 function screens.keypressed(key)
+	-- a field with focus eats its editing keys before the screen sees them
+	if comps.editbox_keypressed(key) then return end
 	local name = KEYMAP[key] or key:upper()
 	local top = screens.top()
 	if top then screens.call(top, "OnKeyDown", name) end
+end
+
+--- Typed characters (love.textinput), for whichever comp holds focus.
+function screens.textinput(text)
+	comps.editbox_textinput(text)
 end
 
 local function to_screen_coords(x, y)
@@ -384,6 +400,8 @@ function screens.mousepressed(x, y, button)
 					local lx, ly = comps.screen_rect(hit)
 					local row = comps.listbox_row(hit, rx - lx, ry - ly)
 					if row then hit.props["listbox.selected"] = row end
+				elseif hit.type == "Editbox" then
+					comps.set_focus(hit)
 				elseif hit.type == "Slider" then
 					-- sliders are dragged, so remember which one until the
 					-- button comes back up (see screens.mousereleased)

@@ -150,7 +150,14 @@ API.IsCompVisible = function(name)
 	return comp ~= nil and comps.get(comp, "visible") == true
 end
 
-API.SetUIFocus = stub("SetUIFocus")
+--- Point the keyboard at a named comp. new-profile-events.lua calls this every
+-- frame from OnUpdate, so it has to be cheap and idempotent.
+API.SetUIFocus = function(name)
+	local env = getfenv(2)
+	local screen = env.__screen
+	local comp = screen and screen.compmap[tostring(name)]
+	if comp then comps.set_focus(comp) end
+end
 API.GetComps = stub("GetComps")
 API.GetNumberOfComps = stub("GetNumberOfComps")
 API.GetCompNameByIndex = stub("GetCompNameByIndex")
@@ -756,6 +763,8 @@ function engine.start()
 		end
 		screens.keypressed(key)
 	end
+
+	love.textinput = function(text) screens.textinput(text) end
 
 	love.mousemoved = function(x, y) screens.mousemoved(x, y) end
 	love.mousepressed = function(x, y, button) screens.mousepressed(x, y, button) end

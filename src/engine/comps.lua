@@ -202,6 +202,10 @@ function comps.area(comp)
 		local img = assets.image(p["listbox.bm_frame"])
 		if img then return img:getWidth(), img:getHeight() end
 		return 0, 0
+	elseif t == "Editbox" then
+		local img = assets.image(p["editbox.bm_panel"])
+		if img then return img:getWidth(), img:getHeight() end
+		return 0, 0
 	end
 	return 0, 0
 end
@@ -281,6 +285,8 @@ local function draw_self(comp, w, h)
 		comps.draw_slider(comp, w, h)
 	elseif t == "Listbox" then
 		comps.draw_listbox(comp, w, h)
+	elseif t == "Editbox" then
+		comps.draw_editbox(comp, w, h)
 	end
 	-- Marker/Aligner/Emitter/Path/Model/Scriptable/TouchGrid: nothing (yet)
 
@@ -465,6 +471,94 @@ function comps.draw_listbox(comp, w, h)
 		font.draw(fnt, tostring(items[index]), pad_l, y,
 			index == selected and { 1, 1, 1, 1 } or { 0.72, 0.7, 0.66, 1 })
 	end
+end
+
+-- --------------------------------------------------------------- editboxes
+--
+-- A text field. `editbox.text` is the contents, `editbox.max_chars` the limit,
+-- and a caret blinks at the end of the line while the box holds focus.
+--
+-- Focus is engine-wide rather than per screen, because that is how the scripts
+-- use it: SetUIFocus names one comp, and ui/fw/new-profile-events.lua calls it
+-- again from OnUpdate on every single frame.
+
+comps.focused = nil
+local blink = 0
+
+--- Give (or with nil, take away) keyboard focus.
+function comps.set_focus(comp)
+	if comps.focused == comp then return end
+	comps.focused = comp
+	blink = 0 -- a caret visible the instant you click reads as responsive
+end
+
+function comps.update_blink(dt)
+	blink = blink + dt
+end
+
+function comps.draw_editbox(comp, w, h)
+	local p = comp.props
+	local panel = assets.image(comp.hover and p["editbox.bm_panel_over"] or nil)
+		or assets.image(p["editbox.bm_panel"])
+	if panel then
+		love.graphics.setColor(1, 1, 1, 1)
+		love.graphics.draw(panel, 0, 0)
+	end
+
+	local text = tostring(p["editbox.text"] or "")
+	local fnt = p["editbox.font"]
+	local scale = num(comp, "editbox.text_scale", 1)
+	local ox, oy = pos2(comp, "editbox.text_offset")
+	local tw, th = font.measure(fnt, text)
+	-- padding is documented in the template as "pixels to pad on left and right"
+	local x = num(comp, "editbox.padding", 24) + ox
+	local y = (h - th * scale) / 2 + oy
+
+	love.graphics.push()
+	love.graphics.translate(x, y)
+	if scale ~= 1 then love.graphics.scale(scale, scale) end
+	font.draw(fnt, text, 0, 0, { 1, 1, 1, 1 })
+	love.graphics.pop()
+
+	if comps.focused == comp and blink % 1 < 0.5 then
+		local caret = assets.image(p["editbox.bm_cursor"])
+		if caret then
+			love.graphics.setColor(1, 1, 1, 1)
+			love.graphics.draw(caret, x + tw * scale, y)
+		end
+	end
+end
+
+--- Typed text for the focused box. Returns true if it consumed it.
+--
+-- ASCII only: love.textinput hands over UTF-8 and the .mft faces are LATIN-1,
+-- so anything above 127 would arrive as two bytes and draw as two wrong
+-- glyphs. Profile names are the only thing this port types.
+function comps.editbox_textinput(text)
+	local comp = comps.focused
+	if not comp or comp.type ~= "Editbox" then return false end
+	local out = tostring(comp.props["editbox.text"] or "")
+	local max = num(comp, "editbox.max_chars", 32)
+	for i = 1, #text do
+		local b = text:byte(i)
+		if #out >= max then break end
+		if b >= 32 and b < 127 then out = out .. string.char(b) end
+	end
+	comp.props["editbox.text"] = out
+	return true
+end
+
+--- Editing keys for the focused box. Returns true if it consumed the key, so
+-- the screen's own OnKeyDown never sees a backspace meant for the field.
+function comps.editbox_keypressed(key)
+	local comp = comps.focused
+	if not comp or comp.type ~= "Editbox" then return false end
+	if key == "backspace" then
+		local cur = tostring(comp.props["editbox.text"] or "")
+		comp.props["editbox.text"] = cur:sub(1, -2)
+		return true
+	end
+	return false
 end
 
 -- ---------------------------------------------------------------- emitters

@@ -13,6 +13,7 @@ save.game = {
 	quests_completed = {}, -- ["chapter.quest"] = true
 	survival_best = { score = 0, time = 0, kills = 0 }, -- kept: pre-bests saves
 	bests = {}, -- [mode] = { score, time, kills } for every endless mode
+	seen = { weapons = {}, perks = {} }, -- first sight drives the unlock screens
 	stats = { -- lifetime totals, the Statistics screen's whole content
 		kills = 0,
 		shots = 0,
@@ -73,6 +74,9 @@ function save.load()
 		save.game.survival_best = state.game.survival_best
 			or { score = 0, time = 0, kills = 0 }
 		save.game.bests = state.game.bests or {}
+		local seen = state.game.seen or {}
+		save.game.seen.weapons = seen.weapons or {}
+		save.game.seen.perks = seen.perks or {}
 		for k, v in pairs(state.game.stats or {}) do save.game.stats[k] = v end
 		-- saves written before per-mode bests existed only knew survival
 		if not save.game.bests.survival and save.game.survival_best.score > 0 then
@@ -137,6 +141,16 @@ save.ENDLESS_MODES = {
 
 function save.best(mode)
 	return save.game.bests[mode]
+end
+
+--- First sight of a weapon or perk, per profile. Returns true the first time,
+-- which is when the unlock screens are worth showing.
+function save.mark_seen(kind, id)
+	local set = save.game.seen[kind]
+	if not set or id == nil or set[id] then return false end
+	set[id] = true
+	save.flush()
+	return true
 end
 
 --- Record an endless run; returns true when it beats that mode's best score.

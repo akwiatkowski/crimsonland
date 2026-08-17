@@ -801,6 +801,11 @@ local function update_drops(game, dt)
 				p.cooldown = 0
 				p.ammo = game.clip_size()
 				audio.play_sound("sfx/unlock_weapon")
+				-- first time this profile has held it: the pak has a screen
+				-- for that (attract mode does not get to unlock anything)
+				if not game.demo then
+					require("src.game.unlocks").saw_weapon(d.weapon)
+				end
 				if game.mode == "weaponpicker" then
 					game.score = game.score + 500 -- that's the point
 				end
@@ -1371,12 +1376,14 @@ end
 function game.on_screen_draw(screen_name, screen)
 	require("src.game.records").draw(screen_name, screen)
 	require("src.game.gallery").draw(screen_name, screen)
+	require("src.game.unlocks").draw(screen_name, screen)
 end
 
 --- Screens the engine pushes carry no progress state of their own.
 function game.on_screen_enter(screen_name, screen)
 	require("src.game.records").prepare(screen_name, screen)
 	require("src.game.gallery").prepare(screen_name, screen)
+	require("src.game.unlocks").prepare(screen_name, screen)
 	if screen_name == "MainMenu" then
 		-- reaching the menu with nothing running means attract mode
 		if not game.active then game.start_demo() end
@@ -1392,6 +1399,9 @@ function game.on_ui_click(screen_name, comp_name)
 	-- Back is a framework convention: several pak layouts ship the button and
 	-- no handler for it, because the C++ side popped the screen. Skip screens
 	-- whose own script already started leaving, or they would pop twice.
+	-- the unlock celebrations have no button on them at all: any click closes
+	if require("src.game.unlocks").on_click(screen_name) then return true end
+
 	if comp_name == "Back" then
 		local screens = require("src.engine.screens")
 		local s = screens.find(screen_name)
@@ -1449,6 +1459,7 @@ function game.on_ui_click(screen_name, comp_name)
 			perk.apply(game.mods, game)
 			game.perk_choices = nil
 			audio.play_sound("sfx/unlocked")
+			if not game.demo then require("src.game.unlocks").saw_perk(perk) end
 			print(("[game] perk chosen: %s"):format(perk.name))
 			local screens = require("src.engine.screens")
 			screens.pop("PickAPerk")

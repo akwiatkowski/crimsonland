@@ -45,13 +45,16 @@ Done:
 - [x] Mod architecture (engine = console, `mods/` = cartridges, `--mod=<name>`)
 - [x] In-game HUD rebuilt from the original 2014 art (crosshair, health pie,
       ammo, XP strip, powerup chips)
+- [x] Retina-native rendering on the 1080p art set (canvas at true pixel
+      density, glyphs rasterized at device size)
+- [x] `.mft` bitmap font decoder — the game's own letterforms, with kerning
+- [x] Original `fxs/` particle DSL interpreted (spent brass on the real
+      emitter parameters; the pak ships no blood/explosion effect files)
+- [x] Quest and chapter unlock gating fed from the save data
 
 Next:
 
-- [ ] HUD/render crispness on Mac retina (canvas upscale + DPI strategy)
-- [ ] Original `fxs/` particle DSL interpreter (current FX layer is hand-rolled)
-- [ ] `.mft` bitmap font decoder — real letterforms in HUD and menus
-- [ ] Quest unlock gating + HighScores/Statistics screens fed from the save data
+- [ ] HighScores / Statistics screens fed from the save data
 - [ ] Mod arch phase 2: move `src/game/` into `mods/vanilla/`
 
 ## Rebuilding from scratch

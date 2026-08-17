@@ -97,8 +97,24 @@ Escape aborts the quest back to the menu.
 | `tools/`                | `extract_pak.py` — PAK V11 extractor               |
 | `vendor/`               | Original rar, installer, `extracted/`, `assets*/` (gitignored) |
 
+## License
+
+The code in this repository — the reimplemented engine (`src/engine/`), the game
+as a mod (`mods/`), the autotest harness (`src/test/`), the PAK extractor
+(`tools/`) and the LÖVE entry points — is **GPL-3.0-or-later**. See [LICENSE](LICENSE).
+
+**Mod linking exception.** Mods under `mods/` that are not derived from this
+program's source and that talk to the engine only through the contract in
+`src/engine/mod.lua` may be licensed however their authors like. Changes to the
+engine itself stay under the GPL. The exact wording is at the top of `LICENSE`.
+
 ## Legal note
 
-Assets/scripts are copyrighted by 10tons. This project is a personal interoperability
-port for a legitimately owned GOG copy — do not redistribute the `assets*/` or
-`extracted/` directories (they are gitignored).
+The game is not mine and is not here. Every bitmap, sound, music track, font,
+XML data file, original Lua script and executable string belongs to **10tons Ltd**;
+this repo ships none of them (`vendor/` and `extracted/` are gitignored) and reads
+them at runtime from your own installation. You need a legitimate copy of the 2014
+remaster to run any of this — it is an interoperability port, not a redistribution.
+
+"Crimsonland" is a trademark of 10tons Ltd. This project is unofficial and is not
+affiliated with or endorsed by them.

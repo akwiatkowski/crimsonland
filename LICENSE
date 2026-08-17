@@ -1,3 +1,72 @@
+Crimsonland macOS Port -- licensing
+===================================
+
+Copyright (C) 2026 Aleksander Kwiatkowski
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version. The full, unmodified text of that license follows below.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with
+this program. If not, see <https://www.gnu.org/licenses/>.
+
+
+What this license covers
+------------------------
+
+Only the original work in this repository: the reimplemented engine runtime
+(`src/engine/`), the game code shipped as mods (`mods/`), the autotest harness
+(`src/test/`), the extraction tooling (`tools/`), and the LOVE entry points
+(`main.lua`, `conf.lua`). All of it is the product of reverse-engineering a
+legitimately owned copy of the game and then writing new code; none of it is
+copied from the original.
+
+It does NOT cover the game itself. The bitmaps, sounds, music, fonts, XML data
+files, the original Lua scripts and the strings held in the original executable
+remain the copyright of 10tons Ltd. They are not distributed here -- `vendor/`
+is gitignored -- and are read at runtime from your own copy of the game. You
+need a legitimate copy of Crimsonland (2014 remaster) to run this.
+
+"Crimsonland" is a trademark of 10tons Ltd. This project is an unofficial
+interoperability port, not affiliated with or endorsed by 10tons Ltd.
+
+
+Additional permission for mods (GNU GPL version 3, section 7)
+-------------------------------------------------------------
+
+This program loads mods from `mods/<name>/`, and a mod reaches the engine
+through `require`. So that mod authors are free to choose their own terms:
+
+  As a special exception, the copyright holders of this program give you
+  permission to combine this program with independent modules loaded through
+  its mod interface, and to convey the resulting work under terms of your
+  choice, provided that you also meet, for each such independent module, the
+  terms and conditions of that module's own license.
+
+  An independent module here means a directory under `mods/` -- other than
+  `mods/vanilla/`, which is part of this program -- that is not derived from
+  or based on this program's source, and that reaches the engine only through
+  the mod contract documented in `src/engine/mod.lua`.
+
+  Modified versions of this program itself, including any change under
+  `src/`, `mods/vanilla/`, `tools/`, `main.lua` or `conf.lua`, remain covered
+  by the GNU General Public License in full.
+
+  If you modify this program, you may extend this exception to your version,
+  but you are not obliged to do so. If you do not wish to do so, delete this
+  exception statement from your version.
+
+
+================================================================================
+  The GNU General Public License, version 3, follows in full and unmodified.
+================================================================================
+
+
                     GNU GENERAL PUBLIC LICENSE
                        Version 3, 29 June 2007
 

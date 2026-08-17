@@ -41,6 +41,36 @@ local MAX_CREATURES = 90 -- hard cap so den spawners can't flood the world
 
 local DIFFICULTY = { NORMAL = 1.0, HARDCORE = 1.5, GRIM = 2.0 }
 
+-- The pak ships eight music files and prog.dll names seven of them, in one
+-- fixed table of 20-byte slots (offset 1151836, ending exactly where the sfx
+-- strings begin). Two of the seven have a documented home in the shipped
+-- scripts: crimson_theme is the main menu's (ui/fw/main-menu-events.lua) and
+-- shortie_monk the trooper scene's. What is left is the in-game set, and gt1's
+-- own filename says which job that is. The eighth file, intro.ogg, is in no
+-- table and belongs to the intro video this port does not play.
+--
+-- Every quest and every endless run used to open crimsonquest alone.
+local INGAME_MUSIC = {
+	"music/crimsonquest",
+	"music/gt1_ingame",
+	"music/gt2_harppen",
+	"music/gt3_3cwonder",
+	"music/gt4_claddon01",
+}
+
+local endless_track = 0
+
+--- Track for a run. A quest picks deterministically from (chapter, quest), so
+-- a level always sounds like itself and a retry does not reshuffle; the
+-- endless modes have no such identity, so they walk the set run by run.
+local function ingame_music(chapter, quest)
+	if chapter then
+		return INGAME_MUSIC[(chapter * 10 + quest) % #INGAME_MUSIC + 1]
+	end
+	endless_track = endless_track % #INGAME_MUSIC + 1
+	return INGAME_MUSIC[endless_track]
+end
+
 -- The XML variant stats are late-game values; the original scaled them per
 -- quest via defs compiled into prog.dll. Approximate the intended feel:
 -- chapter-1 basics die to 2-4 pistol shots (4.1 dmg vs ALIEN 68 hp raw) and
@@ -228,7 +258,7 @@ function game.start_quest(chapter, quest, difficulty)
 	game.bosses_alive = 0
 
 	game.active = true
-	audio.switch_music("music/crimsonquest", 0, 1)
+	audio.switch_music(ingame_music(chapter, quest), 0, 1)
 end
 
 -- survival: creature types join the pool over time ("Variant_39" is the
@@ -252,8 +282,7 @@ local SURVIVAL_WAVES = {
 -- ("MainMenu" pushes GameCrimsonland with parm_demo="MENU_COMBAT_1..5"), so
 -- the menu sits over a session an AI is playing rather than over a still.
 function game.start_demo()
-	game.start_survival("survival")
-	game.demo = true
+	game.start_survival("survival", true)
 	game.no_perks = true -- nothing may interrupt with a UI screen
 	game.spawn_interval = 1.2
 	game.max_concurrent = 10
@@ -273,8 +302,8 @@ function game.start_demo()
 	audio.duck = 0.25
 end
 
-function game.start_survival(mode)
-	game.demo = false
+function game.start_survival(mode, demo)
+	game.demo = demo or false
 	input.set_controller(nil)
 	audio.duck = 1
 	game.mode = mode or "survival"
@@ -322,7 +351,11 @@ function game.start_survival(mode)
 	end
 
 	game.active = true
-	audio.switch_music("music/crimsonquest", 0, 1)
+	-- The attract demo is scenery behind a menu that owns its own music
+	-- (ui/fw/main-menu-events.lua switches to crimson_theme on entry). Taking
+	-- the music over is a real run's privilege — starting the demo after that
+	-- OnEnter is why the theme was never heard.
+	if not game.demo then audio.switch_music(ingame_music(), 0, 1) end
 end
 
 -- difficulty/pool ramp, recomputed from elapsed time every frame

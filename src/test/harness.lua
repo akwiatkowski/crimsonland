@@ -62,6 +62,9 @@ function harness.capture()
 			tostring(game.kills_goal or "inf"), #game.creatures, #game.bullets))
 	end
 
+	local music = require("src.engine.audio").current_music
+	if music then print(("  music %s"):format(music)) end
+
 	local fx = require("src.engine.fx")
 	if fx.count() > 0 then
 		print(("  fx particles=%d screen=%d world=%d"):format(

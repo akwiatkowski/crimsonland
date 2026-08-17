@@ -1,0 +1,44 @@
+# Machine-readable licensing, per the REUSE specification (version 3.3).
+# https://reuse.software/spec-3.3/
+#
+# This file states the same boundary the LICENSE preamble states in prose: the
+# reimplementation is ours and copyleft, the original game data under vendor/ is
+# 10tons' and not ours to license. It exists so that tooling (SBOM generators,
+# distro packaging, license scanners) can never mistake extracted assets for
+# code we wrote -- vendor/ is gitignored, so a scanner only ever meets it on a
+# machine that has run `make extract`, which is exactly when the distinction
+# starts to matter.
+
+version = 1
+
+SPDX-PackageName = "crimsonland-macos-port"
+SPDX-PackageSupplier = "Aleksander Kwiatkowski <alex@homeio.org>"
+SPDX-PackageDownloadLocation = "https://github.com/akwiatkowski/crimsonland"
+
+# Everything in the repository is ours unless a later rule says otherwise.
+#
+# precedence = "aggregate" means a per-file `SPDX-License-Identifier` comment
+# wins over this block if one is ever added. That keeps the door open for
+# per-file headers later without having to rewrite this file.
+[[annotations]]
+path = "**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Aleksander Kwiatkowski"
+SPDX-License-Identifier = "GPL-3.0-or-later"
+
+# The original game. Extracted from the user's own copy by `make extract`, never
+# committed and never redistributed -- see the Makefile and .gitignore.
+#
+# precedence = "override" because this must win unconditionally. Some of the
+# extracted files are the original's own Lua scripts, which carry 10tons'
+# comments and could otherwise be misread as source of ours.
+#
+# LicenseRef-Proprietary-10tons is a REUSE license reference rather than an SPDX
+# identifier because there is no public licence document to point at: the terms
+# are whatever EULA came with your copy of the game. The only claim made here is
+# the true one -- these files are not covered by this repository's licence.
+[[annotations]]
+path = "vendor/**"
+precedence = "override"
+SPDX-FileCopyrightText = "10tons Ltd"
+SPDX-License-Identifier = "LicenseRef-Proprietary-10tons"

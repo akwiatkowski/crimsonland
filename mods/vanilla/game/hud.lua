@@ -27,6 +27,11 @@ local F_SMALL = "fonts/small.mft"
 local F_MEDIUM = "fonts/medium.mft"
 local F_AMMO = "fonts/ammo.mft"
 
+-- Below this half-angle (radians, ~2.9 degrees) a weapon gets the tight aim
+-- ring: pistol, gauss family, blade gun and the rifles, but not the miniguns
+-- or any shotgun.
+local TIGHT_SPREAD = 0.05
+
 local function set(c, a)
 	love.graphics.setColor(c[1], c[2], c[3], a or 1)
 end
@@ -56,7 +61,14 @@ function hud.draw_cursor(game)
 	local camx, camy = game.camera()
 	local mx, my = (p.aim_x or p.x) - camx, (p.aim_y or p.y) - camy
 
-	local circle = assets.image("game/aim_circle.png")
+	-- Two aim rings ship, and the difference between them is accuracy: the
+	-- tight one for a gun that puts its round where the crosshair is, the wide
+	-- one for a gun that throws a fan. `w.spread` (data.lua) is the same cone
+	-- the shot actually leaves in, so the crosshair stops being decoration and
+	-- starts telling you what this weapon will do.
+	local tight = p.weapon and p.weapon.spread and p.weapon.spread < TIGHT_SPREAD
+	local circle = assets.image(tight and "game/aim_small_circle.png"
+		or "game/aim_circle.png")
 	local reloading = p.reloading and p.reloading > 0
 	local dot = assets.image(reloading and "game/aim_dot_reloading.png"
 		or "game/aim_dot.png")
@@ -108,9 +120,67 @@ local function draw_health(game)
 			-math.pi / 2, -math.pi / 2 + frac * math.pi * 2, 32)
 	end
 
+	-- Shield runs on a timer and until now said so only as a chip above the
+	-- dial. health_pie_2 is the smooth twin of the segmented ring behind the
+	-- health -- a second gauge for a second number, which is what it looks
+	-- like -- so the shield drains its own ring around the same dial.
+	local shield = game.effects.SHIELD
+	if shield then
+		local def
+		for _, pu in ipairs(game.POWERUPS or {}) do
+			if pu.id == "SHIELD" then def = pu break end
+		end
+		local frac = def and def.dur > 0 and math.min(1, shield / def.dur) or 1
+		local ring = assets.image("game/health_pie_2.png")
+		if ring then
+			love.graphics.setColor(0.45, 0.8, 1, 0.9)
+			local s = (r * 2 + 20) / ring:getWidth()
+			love.graphics.draw(ring, cx, cy, 0, s, s,
+				ring:getWidth() / 2, ring:getHeight() / 2)
+		end
+		-- and the time left as an arc over it
+		love.graphics.setColor(0.45, 0.8, 1, 0.95)
+		love.graphics.setLineWidth(3)
+		love.graphics.arc("line", "open", cx, cy, r + 10,
+			-math.pi / 2, -math.pi / 2 + frac * math.pi * 2, 32)
+		love.graphics.setLineWidth(1)
+	end
+
 	local _, fh = font.measure(F_MEDIUM, "0")
 	text_center(F_MEDIUM, tostring(math.max(0, math.floor(p.hp))),
 		cx, cy - fh / 2, BONE)
+end
+
+-- The announcement banner: two halves of one plate, each fading at one end,
+-- butted together with the text across the seam.
+local BANNER_TIME = 1.6
+
+local function draw_banner(game)
+	local b = game.banner
+	if not b then return end
+	-- up fast, hold, then out
+	local k = math.min(1, b.t / 0.15) * math.min(1, (BANNER_TIME - b.t) / 0.45)
+	if k <= 0 then return end
+
+	local plate = assets.image("game/bonus_text_holder.png")
+	local mirror = assets.image("game/bonus_text_holder_mirror.png")
+	local cy = H * 0.26
+	local tw = font.measure(F_MEDIUM, b.text)
+	if plate and mirror then
+		local pw, ph = plate:getWidth(), plate:getHeight()
+		-- stretch the pair to whatever the line needs, so a long announcement
+		-- does not hang off the ends of its own plate
+		local sx = math.max(1, (tw + 70) / (pw * 2))
+		love.graphics.setColor(1, 1, 1, 0.85 * k)
+		-- Each half is solid at one end and fades at the other, and the solid
+		-- ends are the ones that have to meet: butted the other way the banner
+		-- has a hole exactly where the text sits. Plate left, mirror right.
+		love.graphics.draw(plate, W / 2 - pw * sx, cy - ph / 2, 0, sx, 1)
+		love.graphics.draw(mirror, W / 2, cy - ph / 2, 0, sx, 1)
+	end
+	local _, fh = font.measure(F_MEDIUM, b.text)
+	font.draw(F_MEDIUM, b.text, W / 2 - tw / 2, cy - fh / 2, BONE)
+	love.graphics.setColor(1, 1, 1, 1)
 end
 
 local function draw_weapon(game)
@@ -312,6 +382,7 @@ function hud.draw(game)
 	draw_death_clock(game)
 	draw_xp(game)
 	draw_effects(game)
+	draw_banner(game)
 	hud.draw_cursor(game)
 	draw_outcome(game)
 	love.graphics.setColor(1, 1, 1, 1)

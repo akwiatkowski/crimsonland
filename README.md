@@ -99,6 +99,17 @@ Done:
       and an untextured one — so this is the one place the port deliberately
       goes past the 2014 build
 
+- [x] Every shot reads as itself: spatter scaled to the damage that caused it,
+      a per-family impact off each weapon's own `type`/`flags` (energy sparks
+      in the colour of the bolt, the blade and the gauss family throwing a
+      tight spray that carries), exit spatter streaked along the shot onto the
+      ground behind the body, family-coloured ground marks, a hit flash, ice
+      chips instead of blood on a frozen creature, and overkill that takes a
+      creature apart instead of playing its death
+- [x] The three powerups the original had and this port did not — Fireblast,
+      Shock Chain, Fire Spinner — plus the announcement banner the pak ships
+      the plate for, and brass only from the guns that have a case to eject
+
 Next:
 
 - [ ] Gamepad support (`joystick` is enabled but unused)
@@ -116,7 +127,8 @@ make test      # scripted autotest (SCENARIO=quest-smoke): ASCII captures to
                # the terminal plus PNG frames in LÖVE's save directory
 ```
 
-Scenarios: `quest-smoke`, `quest-fast`, `combat-smoke` (an AI plays, so
+Scenarios: `quest-smoke`, `quest-fast`, `quest-win` (an AI plays chapter 1
+quest 1 to the end, for the completed panel), `combat-smoke` (an AI plays, so
 weapons/hits/drops are exercised), `survival-smoke`, `rush-smoke`,
 `menus-smoke` (galleries + statistics), `options-smoke`, `fx-smoke`,
 `emitter-smoke`, `editbox-smoke`, `perks-smoke`, `custom-smoke`.
@@ -125,6 +137,12 @@ Scenarios run on a fixed 1/60 clock as fast as the machine manages, not on
 real time — a minimized LÖVE window is App-Nap throttled on macOS, which used
 to make a 65-second scenario take minutes and look like a hang. They are also
 reproducible: `love.math` is seeded, so two runs agree exactly.
+
+A test run never opens a window at all (`conf.lua` creates it hidden under
+`--autotest`), never makes a sound, and keeps its progress in its own
+`~/Library/Application Support/Crimsonland-Test/` — so it can be left running
+while the machine is used for something else. Captures still come out: the
+canvas dumps and backbuffer screenshots land in LÖVE's own save directory.
 
 In-game controls: WASD/arrows move, mouse aims, LMB fires, R reloads,
 Escape aborts the quest back to the menu.

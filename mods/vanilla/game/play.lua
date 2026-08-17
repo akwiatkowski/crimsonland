@@ -136,7 +136,30 @@ local POWERUPS = {
 	-- powerup table). Added with the perks, because Slow Time, High Damage
 	-- exists only to be paired with it.
 	{ id = "REFLEX_BOOST", icon = "powerups/powerup-reflex-boost.png", dur = 8, snd = "sfx/unlocked" },
+	-- Three the original had and this port did not. The art ships, the sounds
+	-- ship (sfx/firespinner, sfx/shockwave), and ui/survival-over.lua already
+	-- counts them on the end screen -- it was drawing tallies for powerups that
+	-- could never be collected.
+	{ id = "FIREBLAST", icon = "powerups/powerup-fireblast.png", dur = 0, snd = "sfx/explosion_large" },
+	{ id = "SHOCK_CHAIN", icon = "powerups/powerup-shock-chain.png", dur = 0, snd = "sfx/shockwave" },
+	{ id = "FIRE_SPINNER", icon = "powerups/powerup-fire-spinner.png", dur = 7, snd = "sfx/firespinner" },
 }
+
+-- Fireblast clears the ground you are standing on: everything inside this
+-- goes up at once, with the same falloff a rocket has.
+local FIREBLAST_RADIUS = 210
+local FIREBLAST_DAMAGE = 60
+-- Shock Chain earns its name from the jumps, so the damage per link is modest
+-- and the reach is what makes it worth picking up.
+local SHOCK_JUMPS = 7
+local SHOCK_RANGE = 260
+local SHOCK_DAMAGE = 34
+local SHOCK_DECAY = 0.82 -- per jump
+local SHOCK_ARC_LIFE = 0.22
+-- The spinner throws one flame round per interval, turning as it goes, so it
+-- writes a spiral outward from the player for as long as it runs.
+local SPINNER_INTERVAL = 0.045
+local SPINNER_TURN = 2.9 -- radians per second
 local POWERUP_BY_ID = {}
 for _, pu in ipairs(POWERUPS) do POWERUP_BY_ID[pu.id] = pu end
 game.POWERUPS = POWERUPS -- the HUD reads icons/durations for effect timers
@@ -208,6 +231,9 @@ local function init_session(mode, chapter, quest, terrain_override)
 	game.drops = {}
 	game.effects = {} -- active timed powerups: id -> seconds left
 	game.hazes = {} -- blasts still bending the air over themselves
+	game.arcs = {} -- shock-chain links still on screen
+	game.banner = nil
+	game.spinner_a, game.spinner_cd = 0, 0
 	game.decals = {} -- blood waiting to be stamped into the ground
 	game.shake_t, game.shake_mag = 0, 0
 	game.shake_x, game.shake_y = 0, 0
@@ -230,6 +256,10 @@ local function init_session(mode, chapter, quest, terrain_override)
 	game.kills = 0
 	game.shots = 0
 	game.hits = 0
+	game.weapon_shots = {} -- weapon id -> shots; the end screens' favorite weapon
+	game.powerups_taken = {} -- powerup id -> count, tallied on the survival panel
+	game.walked = 0 -- world pixels covered on foot, shown as "Steps Taken"
+	game.hurt = false -- "Not a Scratch" asks whether anything ever landed
 	game.spawn_timer = 0
 	game.outcome = nil -- "won" | "lost"
 	game.end_timer = nil
@@ -735,8 +765,12 @@ local function update_player(game, dt)
 		local speed = p.speed * game.mods.speed
 			* (1 + game.mods.run_ramp * (p.run_t / RAMP_FULL))
 			* (game.effects.SPEED and 1.5 or 1)
+		local ox, oy = p.x, p.y
 		p.x = math.max(16, math.min(WORLD_W - 16, p.x + dx / len * speed * dt))
 		p.y = math.max(16, math.min(WORLD_H - 16, p.y + dy / len * speed * dt))
+		-- measured after the clamp, so walking into the world edge stops
+		-- adding steps the trooper is not taking
+		game.walked = game.walked + math.sqrt((p.x - ox) ^ 2 + (p.y - oy) ^ 2)
 		p.anim_t = p.anim_t + dt
 	end
 
@@ -806,12 +840,19 @@ local function update_player(game, dt)
 			p.ammo = math.max(0, p.ammo - 1)
 			p.muzzle = 0.05
 			audio.play_sound(p.weapon.snd_fire, 1, 0, 1 + (love.math.random() - 0.5) / 6)
-			-- brass, on the original's own emitter parameters and shell art
-			fx.spawn("fxs/shells1.lua", p.x + math.cos(p.angle) * 14,
-				p.y + math.sin(p.angle) * 14, math.deg(p.angle),
-				{ layer = "world", fade = 0.25 })
+			-- Brass, on the original's own emitter parameters and shell art --
+			-- but only from the weapons that have a case to eject. weapons.xml
+			-- says which in bit 0 of `flags` (data.lua), and firing it
+			-- unconditionally had the flamethrower, the blade gun and the
+			-- bubblegun all dropping shells.
+			if p.weapon.brass then
+				fx.spawn("fxs/shells1.lua", p.x + math.cos(p.angle) * 14,
+					p.y + math.sin(p.angle) * 14, math.deg(p.angle),
+					{ layer = "world", fade = 0.25 })
+			end
 			local w = p.weapon
 			game.shots = game.shots + 1
+			game.weapon_shots[w.id] = (game.weapon_shots[w.id] or 0) + 1
 			-- flame weapons are short-ranged sprays; everything else uses
 			-- the XML range (rockets detonate when they run out)
 			local range = w.projectile_range * RANGE_SCALE
@@ -848,8 +889,11 @@ local function update_player(game, dt)
 					explosive = EXPLOSIVE[w.id] or nil,
 					flame = FLAME[w.id] or nil,
 					fire = game.effects.FIRE_BULLETS and true or nil,
-					-- which sprite off game/projs.tga this round wears
+					-- which sprite off game/projs.tga this round wears, and the
+					-- gun it left, which is the only way to tell a gauss round
+					-- from any other kinetic one
 					art = w.proj_art,
+					weapon_id = w.id,
 				}
 			end
 		end
@@ -869,9 +913,12 @@ end
 local function try_drop(game, x, y)
 	if game.no_drops then return end -- rush: no help is coming
 	local roll = love.math.random()
-	-- My Favourite Weapon: "no more random weapon powerups"
-	if roll < DROP_WEAPON_CHANCE and not game.no_weapon_drops
-		and not game.mods.no_random_weapon then
+	-- One roll across one table, so closing a band must leave a hole rather
+	-- than shift the ones behind it: My Favourite Weapon ("no more random
+	-- weapon powerups") and nukefism otherwise hand the weapon band's 8% to
+	-- the medkits, more than doubling how often health drops.
+	if roll < DROP_WEAPON_CHANCE then
+		if game.no_weapon_drops or game.mods.no_random_weapon then return end
 		-- random weapon up to the current cap, never the one in hand
 		local pool = {}
 		for idx = 2, game.weapon_cap do
@@ -890,10 +937,40 @@ local function try_drop(game, x, y)
 	end
 end
 
+--- Shock Chain: hop from the player to the nearest creature and on to the
+-- nearest one after that, losing bite at every jump. Each link is remembered
+-- for a moment so the draw can put the arc on screen.
+function game.shock_chain(x, y)
+	local damage = SHOCK_DAMAGE
+	local hit = {}
+	local cx, cy = x, y
+	for _ = 1, SHOCK_JUMPS do
+		local best, bestd
+		for _, c in ipairs(game.creatures) do
+			if not c.dying and not hit[c] then
+				local dx, dy = c.x - cx, c.y - cy
+				local d = dx * dx + dy * dy
+				if d < SHOCK_RANGE * SHOCK_RANGE and (not bestd or d < bestd) then
+					best, bestd = c, d
+				end
+			end
+		end
+		if not best then break end
+		hit[best] = true
+		game.arcs[#game.arcs + 1] =
+			{ x1 = cx, y1 = cy, x2 = best.x, y2 = best.y, t = 0 }
+		damage_creature(game, best, damage)
+		cx, cy = best.x, best.y
+		damage = damage * SHOCK_DECAY
+	end
+end
+
 --- Activate a picked-up powerup: instant effect or timed buff.
 local function activate_powerup(game, pu)
 	audio.play_sound(pu.snd)
 	print(("[game] powerup: %s"):format(pu.id))
+	game.powerups_taken[pu.id] = (game.powerups_taken[pu.id] or 0) + 1
+	game.announce(pu.id:gsub("_", " "))
 	if pu.id == "NUKE" then
 		-- the whole field goes at once, and the frame should say so
 		game.flash(0.85, 1, 0.95, 0.85)
@@ -905,6 +982,24 @@ local function activate_powerup(game, pu)
 				damage_creature(game, c, 1e6)
 			end
 		end
+	elseif pu.id == "FIREBLAST" then
+		-- the ground you are standing on, cleared
+		game.flash(0.45, 1, 0.72, 0.35)
+		game.shake(8)
+		game.add_haze(game.player.x, game.player.y, FIREBLAST_RADIUS * 0.6)
+		for _, c in ipairs(game.creatures) do
+			if not c.dying then
+				local dx, dy = c.x - game.player.x, c.y - game.player.y
+				local dist = math.sqrt(dx * dx + dy * dy)
+				if dist < FIREBLAST_RADIUS then
+					particles.explosion(c.x, c.y, 45)
+					damage_creature(game, c,
+						FIREBLAST_DAMAGE * (1 - 0.6 * dist / FIREBLAST_RADIUS))
+				end
+			end
+		end
+	elseif pu.id == "SHOCK_CHAIN" then
+		game.shock_chain(game.player.x, game.player.y)
 	else
 		-- Bonus Economist stretches every timed effect; Slow Time, High Damage
 		-- pays for its quad damage by halving Reflex Boost specifically
@@ -919,11 +1014,27 @@ local function activate_powerup(game, pu)
 	end
 end
 
+-- Seconds a creature stays lit after being hit. Short enough to read as an
+-- impact rather than a state, long enough to survive a frame at 60fps -- which
+-- is what makes the pellets of a shotgun blast countable.
+local HIT_FLASH = 0.06
+
 --- Apply damage to a creature; handles the kill (gore, score, xp, drops).
+-- Returns true when this was the blow that killed it, so the caller can throw
+-- the killing hit harder than the ones it survived.
 function damage_creature(game, c, dmg)
-	if c.dying then return end
+	if c.dying then return false end
+	local before = c.hp
 	c.hp = c.hp - dmg
+	-- every hit lands visibly on whatever survives it
+	c.flash_t = HIT_FLASH
 	if c.hp <= 0 then
+		-- Overkill: a blow worth twice what was left does not knock a creature
+		-- over, it takes it apart -- so it skips the death animation and the
+		-- corpse bake and throws the parts instead. Safe to remove immediately:
+		-- everything that walks, attacks, collides or can be shot already tests
+		-- `not c.dying`, so a corpse is inert for every frame it exists.
+		c.overkill = (dmg >= before * 2) or nil
 		c.dying = true
 		c.die_t = 0
 		-- freeze facing so the gore anim + baked corpse keep it
@@ -939,7 +1050,7 @@ function damage_creature(game, c, dmg)
 				0.35 + love.math.random() * 0.3)
 		end
 		-- the parts creatures.xml says this creature is made of
-		gibs.spawn(c)
+		gibs.spawn(c, c.overkill and 2.5 or 1)
 		-- something killed while encased sheds its ice with the rest of it
 		if game.effects.FREEZE then
 			particles.ice_shatter(c.x, c.y, c.variant.scale)
@@ -974,7 +1085,9 @@ function damage_creature(game, c, dmg)
 			end
 			if #picks > 0 then audio.play_sound(picks[love.math.random(#picks)]) end
 		end
+		return true
 	end
+	return false
 end
 
 -- ------------------------------------------------------------------ impact
@@ -1008,6 +1121,16 @@ function game.flash(amount, r, g, b)
 	game.flash_rgb = { r or 1, g or 1, b or 1 }
 end
 
+--- Put a line of text across the middle of the screen for a moment.
+--
+-- The pak ships game/bonus_text_holder.png and its mirror: two halves of one
+-- wide plate, each fading out at one end, meant to butt together into a
+-- banner. That is what it is for -- not a per-kill "+50" floater, which is
+-- what the name suggests until you look at the art.
+function game.announce(text)
+	game.banner = { text = tostring(text), t = 0 }
+end
+
 --- Bend the air over a point in the world for a moment.
 function game.add_haze(x, y, radius)
 	local list = game.hazes
@@ -1015,7 +1138,39 @@ function game.add_haze(x, y, radius)
 	list[#list + 1] = { x = x, y = y, radius = radius, t = 0 }
 end
 
+-- How long a banner stays up, and how long a shock arc is on screen.
+local BANNER_TIME = 1.6
+
 local function update_impact(game, dt)
+	if game.banner then
+		game.banner.t = game.banner.t + dt
+		if game.banner.t >= BANNER_TIME then game.banner = nil end
+	end
+	for i = #game.arcs, 1, -1 do
+		local a = game.arcs[i]
+		a.t = a.t + dt
+		if a.t >= SHOCK_ARC_LIFE then table.remove(game.arcs, i) end
+	end
+	-- Fire Spinner: a flame round every interval, the heading turning as it
+	-- goes, which writes a spiral outward from wherever the player is standing.
+	if game.effects.FIRE_SPINNER and game.player.hp > 0 then
+		game.spinner_a = (game.spinner_a or 0) + SPINNER_TURN * dt
+		game.spinner_cd = (game.spinner_cd or 0) - dt
+		if game.spinner_cd <= 0 then
+			game.spinner_cd = SPINNER_INTERVAL
+			local a = game.spinner_a
+			game.bullets[#game.bullets + 1] = {
+				x = game.player.x + math.cos(a) * 18,
+				y = game.player.y + math.sin(a) * 18,
+				dx = math.cos(a), dy = math.sin(a),
+				speed = 430,
+				dist_left = 300,
+				damage = 9 * game.mods.dmg,
+				flame = true,
+				art = "flame",
+			}
+		end
+	end
 	if game.shake_t and game.shake_t > 0 then
 		game.shake_t = game.shake_t - dt
 		-- squared falloff, so it lands hard and settles fast
@@ -1066,53 +1221,122 @@ local BLAST_TINT = {
 -- Stamps queue and flush once a frame: stamping at the call site would switch
 -- render target once per round of a minigun.
 
-local DECAL_SPLAT = { 65, 1, 30, 30 } -- the splat on game/particles.tga
+-- What a family of weapon leaves on the ground where it connects. All four
+-- rects are on game/particles.tga, the sheet everything else is drawn from:
+-- the blood splat, and the smoke and glow sprites standing in for soot and a
+-- burn. Colour and stretch do the rest, which is why this needs no new art.
+--
+-- Kinetic and ordnance stain red. Flame chars black. The energy families burn
+-- a pale ring in their own colour -- so a field fought over with ion weapons
+-- reads differently from one fought over with a shotgun, which is the whole
+-- point of keeping the marks.
+local MARK_SPLAT = { 65, 1, 30, 30 }
+local MARK_SOOT = { 198, 66, 52, 60 }
+local MARK_BURN = { 138, 74, 44, 44 }
+
+local MARK = {
+	bullet = { rect = MARK_SPLAT, color = { 1, 1, 1 }, alpha = 0.55 },
+	rocket = { rect = MARK_SPLAT, color = { 1, 1, 1 }, alpha = 0.55 },
+	blade = { rect = MARK_SPLAT, color = { 1, 1, 1 }, alpha = 0.6 },
+	flame = { rect = MARK_SOOT, color = { 0.12, 0.1, 0.1 }, alpha = 0.5 },
+	plasma = { rect = MARK_BURN, color = { 0.5, 0.7, 1.0 }, alpha = 0.28 },
+	ion = { rect = MARK_BURN, color = { 0.55, 1.0, 0.6 }, alpha = 0.28 },
+	pulse = { rect = MARK_BURN, color = { 1.0, 0.85, 0.5 }, alpha = 0.28 },
+}
+
 local DECAL_HIT_CHANCE = 0.35
 -- A wave dying at once is a lot of stamps; past this they are dropped rather
 -- than queued, because the ground is already red by then.
 local DECAL_MAX_QUEUED = 64
 
-local decal_quad, decal_quad_scale, decal_qw, decal_qh
+local mark_quads = {}
 
-local function decal_sprite()
+--- The sheet plus a cached quad for one mark rect. Quads address texels, so
+-- the scale that maps back to reference units comes along with it.
+local function mark_sprite(rect)
 	local img = assets.image("game/particles.tga")
 	if not img then return nil end
-	if not decal_quad then
-		local r = DECAL_SPLAT
-		decal_quad, decal_quad_scale = assets.quad(img, r[1], r[2], r[3], r[4])
-		decal_qw, decal_qh = select(3, decal_quad:getViewport())
+	local key = rect[1] * 1000 + rect[2]
+	local q = mark_quads[key]
+	if not q then
+		local quad, qscale = assets.quad(img, rect[1], rect[2], rect[3], rect[4])
+		local _, _, qw, qh = quad:getViewport()
+		q = { quad = quad, scale = qscale, w = qw, h = qh }
+		mark_quads[key] = q
 	end
-	return img
+	return img, q
 end
 
---- Queue a stain at a point in the world.
-function game.blood_decal(x, y, scale, alpha)
+--- Queue a mark on the ground. `opts` carries the family look (rect, color,
+-- alpha) and the shape of this particular one: `rot` to lie it along a
+-- direction, `stretch` to draw it as a streak rather than a blot.
+function game.ground_mark(x, y, scale, opts)
 	local q = game.decals
 	if not q or #q >= DECAL_MAX_QUEUED then return end
+	opts = opts or {}
+	local m = MARK[opts.family or "bullet"] or MARK.bullet
 	q[#q + 1] = {
 		x = x, y = y,
+		rect = m.rect,
+		color = opts.color or m.color,
+		alpha = opts.alpha or m.alpha,
 		scale = scale or 1,
-		alpha = alpha or 0.5,
-		rot = love.math.random() * math.pi * 2,
+		stretch = opts.stretch or 1,
+		rot = opts.rot or (love.math.random() * math.pi * 2),
 	}
+end
+
+--- The plain red stain, for everything that is just blood hitting dirt.
+function game.blood_decal(x, y, scale, alpha)
+	game.ground_mark(x, y, scale, { family = "bullet", alpha = alpha })
 end
 
 local function flush_decals(game)
 	local q = game.decals
 	if not q or #q == 0 then return end
-	local img = decal_sprite()
-	if img then
-		love.graphics.setCanvas(game.terrain)
-		for _, d in ipairs(q) do
-			love.graphics.setColor(1, 1, 1, d.alpha)
-			local sc = d.scale * decal_quad_scale
-			love.graphics.draw(img, decal_quad, d.x, d.y, d.rot, sc, sc,
-				decal_qw / 2, decal_qh / 2)
+	love.graphics.setCanvas(game.terrain)
+	for _, d in ipairs(q) do
+		local img, sp = mark_sprite(d.rect)
+		if img then
+			local c = d.color
+			love.graphics.setColor(c[1], c[2], c[3], d.alpha)
+			local sc = d.scale * sp.scale
+			-- stretch runs along the mark's own x, which `rot` has already
+			-- pointed the way the shot was going
+			love.graphics.draw(img, sp.quad, d.x, d.y, d.rot,
+				sc * d.stretch, sc, sp.w / 2, sp.h / 2)
 		end
-		love.graphics.setColor(1, 1, 1, 1)
-		love.graphics.setCanvas()
 	end
+	love.graphics.setColor(1, 1, 1, 1)
+	love.graphics.setCanvas()
 	for i = #q, 1, -1 do q[i] = nil end
+end
+
+-- Spatter thrown past whatever was hit, baked where it lands.
+--
+-- This is the part that makes a shotgun at point-blank range look like a
+-- shotgun at point-blank range: the drops carry on along the shot and stain
+-- the ground behind the body, so the field remembers where the shooting
+-- happened and from which direction. A weapon that punches through (the
+-- gauss family, the blade) throws it further and in a tighter line.
+local EXIT_MIN, EXIT_MAX = 14, 46
+
+local function exit_spatter(game, family, weapon_id, x, y, dir, power, count)
+	local far = particles.punches_through(family, weapon_id)
+	for _ = 1, count do
+		local reach = (EXIT_MIN + love.math.random() * (EXIT_MAX - EXIT_MIN))
+			* power * (far and 1.8 or 1)
+		local spread = far and 0.12 or 0.5
+		local a = dir + (love.math.random() - 0.5) * spread
+		game.ground_mark(x + math.cos(a) * reach, y + math.sin(a) * reach,
+			(0.35 + love.math.random() * 0.35) * power, {
+				family = family,
+				rot = a,
+				-- a drop that flew reads as a streak, not a blot
+				stretch = far and 2.2 or 1.4,
+				alpha = (far and 0.4 or 0.3) + love.math.random() * 0.2,
+			})
+	end
 end
 
 --- Rocket-class detonation: area damage with linear falloff to the edge.
@@ -1169,6 +1393,7 @@ function game.on_attacked(raw)
 	if mods.death_chance > 0 then
 		if love.math.random() < mods.death_chance then
 			p.hp = 0
+			game.hurt = true
 			return true
 		end
 		return false
@@ -1184,6 +1409,9 @@ function game.on_attacked(raw)
 	if taken <= 0 then return false end
 
 	p.hp = p.hp - raw * taken
+	-- "Not a Scratch" is about being touched, not about the health bar: a
+	-- medkit picked up afterwards must not undo it
+	game.hurt = true
 	-- being bitten has to be felt without looking at the health pie
 	game.shake(2 + math.min(5, raw * taken * 0.3))
 	return true
@@ -1306,6 +1534,38 @@ local function update_perks(game, dt)
 	end
 end
 
+--- One round connecting with one creature: what it throws, what it leaves on
+-- the ground, and what it does to the creature.
+local function hit_creature(game, b, c)
+	local dir = math.atan2(b.dy, b.dx)
+	local power = particles.power(b.damage)
+	local family = b.art or "bullet"
+
+	-- Something still encased is not bleeding: chip the ice instead. Nothing
+	-- under it has moved since it froze, so blood would be the wrong picture.
+	local frozen = game.effects.FREEZE ~= nil
+	if frozen then
+		particles.ice_spall(b.x, b.y, dir, power)
+	else
+		particles.impact(family, b.weapon_id, b.x, b.y, dir, power)
+		if love.math.random() < DECAL_HIT_CHANCE then
+			exit_spatter(game, family, b.weapon_id, b.x, b.y, dir, power, 1)
+		end
+	end
+
+	if game.mods.poison > 0 then
+		c.poison_t = 4 -- refreshed on every hit
+	end
+
+	local killed = damage_creature(game, c, b.damage)
+	-- The killing blow throws harder than the hits it survived, so the moment a
+	-- creature breaks is seen rather than inferred from it falling over.
+	if killed and not frozen then
+		particles.impact(family, b.weapon_id, b.x, b.y, dir, power * 1.5)
+		exit_spatter(game, family, b.weapon_id, b.x, b.y, dir, power * 1.3, 2)
+	end
+end
+
 local function update_bullets(game, dt)
 	for i = #game.bullets, 1, -1 do
 		local b = game.bullets[i]
@@ -1330,16 +1590,7 @@ local function update_bullets(game, dt)
 						if b.explosive then
 							explode(game, b.x, b.y, b.damage, b.art)
 						else
-							particles.blood(b.x, b.y, math.atan2(b.dy, b.dx))
-							if love.math.random() < DECAL_HIT_CHANCE then
-								game.blood_decal(b.x, b.y,
-									0.5 + love.math.random() * 0.4,
-									0.3 + love.math.random() * 0.25)
-							end
-							if game.mods.poison > 0 then
-								c.poison_t = 4 -- refreshed on every hit
-							end
-							damage_creature(game, c, b.damage)
+							hit_creature(game, b, c)
 						end
 						break
 					end
@@ -1407,7 +1658,16 @@ local function update_creatures(game, dt)
 	local p = game.player
 	for i = #game.creatures, 1, -1 do
 		local c = game.creatures[i]
-		if c.dying then
+		-- the lit frame after a hit, whatever else the creature is doing
+		if c.flash_t then
+			c.flash_t = c.flash_t - dt
+			if c.flash_t <= 0 then c.flash_t = nil end
+		end
+		if c.overkill then
+			-- it came apart rather than fell over: there is no animation left to
+			-- play and no corpse to bake, the parts are already in the air
+			table.remove(game.creatures, i)
+		elseif c.dying then
 			c.die_t = c.die_t + dt
 			local def = c.def
 			local speed = def and def.die_speed or 1
@@ -1663,6 +1923,7 @@ function game.update(dt)
 		game.xp_next = math.floor(game.xp_next * 1.5)
 		print(("[game] level up! now level %d"):format(game.level))
 		game.levelup_t = game.time -- HUD flashes the level-up ring
+		game.announce(("LEVEL %d"):format(game.level))
 		open_perk_screen(game)
 		return
 	end
@@ -1704,7 +1965,7 @@ function game.update(dt)
 		game.end_timer = 1.2
 		print("[game] quest completed!")
 		require("mods.vanilla.game.save").mark_quest_completed(game.chapter, game.quest,
-			game.difficulty, game.player.hp >= game.player.max_hp)
+			game.difficulty, not game.hurt)
 		if not game.demo then
 			require("mods.vanilla.game.save").record_session(game)
 			require("mods.vanilla.game.achievements").evaluate(game)
@@ -1738,32 +1999,103 @@ function game.update(dt)
 	end
 end
 
+--- The weapon this round was fought with: the one that fired the most shots,
+-- which is what "Favorite Weapon" means on both end screens. Nukefism has no
+-- weapon at all, and a round can end before a single trigger pull.
+function game.favorite_weapon()
+	local best, best_shots = nil, 0
+	for id, shots in pairs(game.weapon_shots) do
+		if shots > best_shots then best, best_shots = data.weapons[id], shots end
+	end
+	return best
+end
+
+-- Pixels per footstep. The trooper is 36 px from shoulder to boot on his 64 px
+-- sprite; read as a 1.8 m human that puts the world at ~5 cm per pixel, so an
+-- ordinary 1 m walking stride is 20 px. The layout's own sample round checks
+-- it: level-completed.lua ships "560" steps against a time of "01:17", and 77 s
+-- of running at the trooper's 180 px/s covers 13 860 px — 693 steps at 20 px
+-- each, which is the authored number once the standing still is taken out.
+-- Nothing but the "Steps Taken" readout depends on this.
+local STEP_LENGTH = 20
+
+-- The six tallies down the side of the survival panel, comp name -> powerup.
+-- The layout names them in its own spelling and parents each to the matching
+-- icon (ui/survival-over.lua), which is what identifies FIRERING as the
+-- fireblast; the other five are their own names with the underscore gone.
+local SURVIVAL_TALLIES = {
+	POWERUP_NUKE = "NUKE",
+	POWERUP_FIRERING = "FIREBLAST",
+	POWERUP_FIRESPINNER = "FIRE_SPINNER",
+	POWERUP_FREEZE = "FREEZE",
+	POWERUP_SHOCKCHAIN = "SHOCK_CHAIN",
+	POWERUP_SPEED = "SPEED",
+}
+
 --- Push the appropriate original end screen for the finished round.
+--
+-- The layouts ship with a designer's sample round baked into every textbox
+-- ("57" kills, "01:17", a Blade Gun) — the C++ engine overwrote them all on
+-- entry, and any field left alone here shows that sample as if it were the
+-- player's own result.
 function game.open_end_screen()
 	local screens = require("src.engine.screens")
 	local comps = require("src.engine.comps")
-	if game.mode ~= "quest" then -- every endless mode ends on this screen
-		local s = screens.push("SurvivalOver")
-		-- fill the stats the layout displays (C++ did this originally)
-		local function put(name, text)
-			if s.compmap[name] then
-				comps.set(s.compmap[name], "textbox.text", { tostring(text) })
-			end
+
+	local s
+	local function put(name, text)
+		if s.compmap[name] then
+			comps.set(s.compmap[name], "textbox.text", { tostring(text) })
 		end
-		put("Score", string.format("%d", game.score))
-		put("Time", string.format("%d:%02d", math.floor(game.time / 60),
-			math.floor(game.time % 60)))
-		put("Kills", string.format("%d", game.kills))
-		put("Accuracy", string.format("%d%%",
-			game.shots > 0 and math.floor(game.hits / game.shots * 100 + 0.5) or 0))
-		local w = game.player.weapon
+	end
+	local function show(name, visible)
+		if s.compmap[name] then
+			comps.set(s.compmap[name], "visible", { visible == true })
+		end
+	end
+	local function put_favorite_weapon()
+		local w = game.favorite_weapon()
 		put("WeaponName", w and (w.name or w.id) or "Bare Hands")
-		if s.compmap.NewLocalHighscore then
-			comps.set(s.compmap.NewLocalHighscore, "visible",
-				{ game.new_highscore == true })
+		-- the end screens use the big portrait of the weapon, not the HUD icon
+		if s.compmap.WeaponIcon and w and w.icon then
+			comps.set(s.compmap.WeaponIcon, "image.bitmap",
+				{ (w.icon:gsub("^weapons/", "weapons/large/")) })
 		end
+	end
+	local function accuracy()
+		return string.format("%d%%",
+			game.shots > 0 and math.floor(game.hits / game.shots * 100 + 0.5) or 0)
+	end
+	local function clock()
+		return string.format("%d:%02d", math.floor(game.time / 60),
+			math.floor(game.time % 60))
+	end
+
+	if game.mode ~= "quest" then -- every endless mode ends on this screen
+		s = screens.push("SurvivalOver")
+		put("Score", string.format("%d", game.score))
+		put("Time", clock())
+		put("Kills", string.format("%d", game.kills))
+		put("Accuracy", accuracy())
+		put_favorite_weapon()
+		for comp, id in pairs(SURVIVAL_TALLIES) do
+			put(comp, string.format("%d", game.powerups_taken[id] or 0))
+		end
+		show("NewLocalHighscore", game.new_highscore)
 	elseif game.outcome == "won" then
-		screens.push("LevelCompleted")
+		s = screens.push("LevelCompleted")
+		put("Time", clock())
+		put("Frags", string.format("%d", game.kills))
+		-- kills per minute, the panel's own headline stat
+		put("KillsPerMinute", string.format("%.2f",
+			game.time > 0 and game.kills / (game.time / 60) or 0))
+		put("Shots", string.format("%d", game.shots))
+		put("Footsteps", string.format("%d", math.floor(game.walked / STEP_LENGTH)))
+		put("Accuracy", accuracy())
+		put_favorite_weapon()
+		show("Unharmed", not game.hurt)
+		-- co-op leftovers: there is no second trooper to compare kills with
+		show("TrooperComparisonGroup", false)
 	else
 		screens.push("LevelFailed")
 	end
@@ -1832,8 +2164,11 @@ end
 -- colour coding that tells a player which alien is the dangerous one is gone.
 -- Multiplying the whole sprite is what makes a blue one read as a different
 -- creature from a green one, so that is what stays. What the stencils are
--- actually for is still unknown (a hit flash and a shader mask are both
--- plausible) -- data.lua parses them, nothing draws them.
+-- actually for is still unknown. A hit flash was the other plausible reading
+-- and it was tried too: masking the flash below to the stencil lights a couple
+-- of stripes without changing the silhouette, so the eye never registers a hit
+-- at all. Two independent experiments, both worse than not using them --
+-- data.lua parses them, nothing draws them.
 local function draw_creature(game, c)
 	local def, v = c.def, c.variant
 	local seq, frame, rot
@@ -1867,6 +2202,18 @@ local function draw_creature(game, c)
 		return
 	end
 	bms.draw(seq, frame, c.x, c.y, rot, v.scale)
+
+	-- The lit frame after a hit: the same frame again, additively, so the shape
+	-- that flashes is exactly the creature's own. This is what makes the
+	-- pellets of a shotgun blast countable -- without it a hit is only visible
+	-- as blood, which says something was hit but not what or how often.
+	if c.flash_t then
+		local k = math.max(0, c.flash_t / HIT_FLASH) * 0.85
+		love.graphics.setBlendMode("add")
+		love.graphics.setColor(k, k, k, 1)
+		bms.draw(seq, frame, c.x, c.y, rot, v.scale)
+		love.graphics.setBlendMode("alpha")
+	end
 
 	-- Encased: game/ice-cube.bms is four blocks rather than an animation, so
 	-- each creature holds the one it was given. The block is a 64px frame, the
@@ -1964,6 +2311,11 @@ local PROJ_RECT = {
 	rocket = { 104, 5, 16, 20 },
 	glow = { 69, 5, 22, 22 },
 	blade = { 66, 34, 29, 29 },
+	-- The fourth sprite, and the last one on the sheet to be placed: a bright
+	-- arc fading behind itself, which is a wave front seen from above. The pulse
+	-- gun is the only weapon that fires one (weapons.xml type=3, its own family)
+	-- and the pak ships sfx/shockwave.ogg next to it.
+	wave = { 5, 26, 55, 27 },
 }
 local proj_cache = {}
 
@@ -2137,8 +2489,15 @@ function game.draw()
 	for _, b in ipairs(game.bullets) do
 		local rot = math.atan2(b.dy, b.dx)
 		if b.flame or b.fire then
-			draw_proj("glow", b.x, b.y, rot, (b.flame and 0.6 or 0.4)
-				+ love.math.random() * 0.12, 1, 0.55, 0.15, 0.85, true)
+			-- Flicker from the clock and the round's own position, NOT from
+			-- love.math.random: draw runs a variable number of times per second
+			-- (it depends on the machine, and in the test harness on how many
+			-- updates are batched behind a frame), so drawing from the shared
+			-- generator feeds gameplay a different stream on every run. That is
+			-- what the seeded harness means when it promises two runs agree.
+			draw_proj("glow", b.x, b.y, rot, (b.flame and 0.66 or 0.46)
+				+ math.sin(game.time * 37 + b.x * 0.13) * 0.06,
+				1, 0.55, 0.15, 0.85, true)
 		elseif b.art == "rocket" then
 			-- the sprite is painted nose-up, so it needs a quarter turn to fly
 			draw_proj("rocket", b.x, b.y, rot + math.pi / 2, 1, 1, 1, 1, 1, false)
@@ -2150,7 +2509,9 @@ function game.draw()
 		elseif b.art == "ion" then
 			draw_proj("glow", b.x, b.y, rot, 0.5, 0.6, 1, 0.65, 0.9, true)
 		elseif b.art == "pulse" then
-			draw_proj("glow", b.x, b.y, rot, 0.75, 1, 0.9, 0.5, 0.9, true)
+			-- the bright edge of the arc has to lead, and the sprite is painted
+			-- with it along the top, so the wave turns a quarter past its heading
+			draw_proj("wave", b.x, b.y, rot + math.pi / 2, 0.7, 1, 0.92, 0.6, 0.9, true)
 		elseif bullet_img then
 			-- kinetic: the trail is drawn from its own right edge, so it lies
 			-- behind the round along the way it came
@@ -2177,9 +2538,23 @@ function game.draw()
 		if not draw_proj("glow", b.x, b.y, 0, 0.5, 0.3, 1, 0.4, 0.9, true) then
 			love.graphics.setBlendMode("add")
 			love.graphics.setColor(0.3, 1, 0.4, 0.9)
-			love.graphics.circle("fill", b.x, b.y, 4 + love.math.random() * 1.5)
+			love.graphics.circle("fill", b.x, b.y,
+				4.75 + math.sin(game.time * 31 + b.y * 0.11) * 0.75)
 			love.graphics.setBlendMode("alpha")
 		end
+	end
+
+	-- shock-chain links: bright, thin and gone almost at once
+	if #game.arcs > 0 then
+		love.graphics.setBlendMode("add")
+		for _, a in ipairs(game.arcs) do
+			local k = 1 - a.t / SHOCK_ARC_LIFE
+			love.graphics.setColor(0.6, 0.85, 1, k)
+			love.graphics.setLineWidth(1 + 2 * k)
+			love.graphics.line(a.x1, a.y1, a.x2, a.y2)
+		end
+		love.graphics.setLineWidth(1)
+		love.graphics.setBlendMode("alpha")
 	end
 
 	hud.draw_shield(game, game.player.x, game.player.y)

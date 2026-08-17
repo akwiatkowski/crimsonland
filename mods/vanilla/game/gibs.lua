@@ -57,21 +57,25 @@ local function throw(seq, x, y, scale, tint, n)
 end
 
 --- Throw one creature's parts. Takes the creature because everything needed
--- (which sheets, how big, what colour) already hangs off it.
-function gibs.spawn(c)
+-- (which sheets, how big, what colour) already hangs off it. `mul` multiplies
+-- how many come off, for a death that was an overkill rather than a kill.
+function gibs.spawn(c, mul)
 	local def, v = c.def, c.variant
 	if not def then return end
+	mul = mul or 1
 	local scale = v and v.scale or 1
 	-- the same tint the corpse bakes with: a green alien sheds green parts
 	local tint = v and { v.r, v.g, v.b } or { 1, 1, 1 }
 
 	local uniq = def.gibs_unique and bms.load(def.gibs_unique)
 	if uniq then
-		throw(uniq, c.x, c.y, scale, tint, love.math.random(UNIQUE_MIN, UNIQUE_MAX))
+		throw(uniq, c.x, c.y, scale, tint,
+			math.ceil(love.math.random(UNIQUE_MIN, UNIQUE_MAX) * mul))
 	end
 	local common = def.gibs_common and bms.load(def.gibs_common)
 	if common then
-		throw(common, c.x, c.y, scale, tint, love.math.random(COMMON_MIN, COMMON_MAX))
+		throw(common, c.x, c.y, scale, tint,
+			math.ceil(love.math.random(COMMON_MIN, COMMON_MAX) * mul))
 	end
 end
 

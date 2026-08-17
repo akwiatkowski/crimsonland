@@ -135,8 +135,8 @@ local function sample(graph, t, default)
 	return graph[#graph].v
 end
 
-local function emit(e, x, y, rot, pool, fade, base_scale, tint)
-	local n = math.floor(rand_range(e.num_parts, 1))
+local function emit(e, x, y, rot, pool, fade, base_scale, tint, count)
+	local n = math.max(1, math.floor(rand_range(e.num_parts, 1) * (count or 1)))
 	local image = e.bitmap and assets.image(e.bitmap)
 	if not image then return end
 	base_scale = base_scale or 1
@@ -221,13 +221,15 @@ end
 --           (a rocket blast and a bursting creature are the same explosion)
 --   color = {r, g, b} overriding whatever the file authored, so the same
 --           fireball can burn orange for a rocket and blue for an ion blast
+--   count = multiplier on every emitter's num_parts, so the same effect can
+--           answer a pistol tick and a gauss slug without a second file
 function fx.spawn(path, x, y, rot, opts)
 	local emitters = fx.load(path)
 	if not emitters then return end
 	opts = opts or {}
 	local pool = pools[opts.layer or "screen"]
 	for _, e in ipairs(emitters) do
-		emit(e, x, y, rot or 0, pool, opts.fade, opts.scale, opts.color)
+		emit(e, x, y, rot or 0, pool, opts.fade, opts.scale, opts.color, opts.count)
 	end
 end
 

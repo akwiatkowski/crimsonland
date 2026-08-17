@@ -695,6 +695,11 @@ function damage_creature(game, c, dmg)
 			or math.atan2(game.player.y - c.y, game.player.x - c.x) + math.pi / 2
 		particles.death_burst(c.x, c.y, c.variant.scale)
 		game.kills = game.kills + 1
+		-- Home Wrecker counts nests: a den is a creature that hatches others
+		if c.spawn_cd and not game.demo then
+			local st = require("src.game.save").game.stats
+			st.dens = st.dens + 1
+		end
 		if c.is_boss then
 			game.bosses_alive = game.bosses_alive - 1
 			print("[game] boss down!")
@@ -805,6 +810,10 @@ local function update_drops(game, dt)
 				-- for that (attract mode does not get to unlock anything)
 				if not game.demo then
 					require("src.game.unlocks").saw_weapon(d.weapon)
+					if d.weapon.id == "BLOW_TORCH" then
+						local st = require("src.game.save").game.stats
+						st.blowtorches = st.blowtorches + 1
+					end
 				end
 				if game.mode == "weaponpicker" then
 					game.score = game.score + 500 -- that's the point
@@ -1076,8 +1085,12 @@ function game.update(dt)
 		game.outcome = "won"
 		game.end_timer = 1.2
 		print("[game] quest completed!")
-		require("src.game.save").mark_quest_completed(game.chapter, game.quest)
-		if not game.demo then require("src.game.save").record_session(game) end
+		require("src.game.save").mark_quest_completed(game.chapter, game.quest,
+			game.difficulty, game.player.hp >= game.player.max_hp)
+		if not game.demo then
+			require("src.game.save").record_session(game)
+			require("src.game.achievements").evaluate(game)
+		end
 	elseif game.player.hp <= 0 then
 		game.outcome = "lost"
 		game.end_timer = 1.6
@@ -1102,6 +1115,7 @@ function game.update(dt)
 				if game.new_highscore then print("[game] new local high score!") end
 			end
 			save.record_session(game)
+			require("src.game.achievements").evaluate(game)
 		end
 	end
 end
@@ -1377,6 +1391,7 @@ function game.on_screen_draw(screen_name, screen)
 	require("src.game.records").draw(screen_name, screen)
 	require("src.game.gallery").draw(screen_name, screen)
 	require("src.game.unlocks").draw(screen_name, screen)
+	require("src.game.achievements").draw(screen_name, screen)
 end
 
 --- Screens the engine pushes carry no progress state of their own.
@@ -1384,6 +1399,7 @@ function game.on_screen_enter(screen_name, screen)
 	require("src.game.records").prepare(screen_name, screen)
 	require("src.game.gallery").prepare(screen_name, screen)
 	require("src.game.unlocks").prepare(screen_name, screen)
+	require("src.game.achievements").prepare(screen_name, screen)
 	if screen_name == "MainMenu" then
 		-- reaching the menu with nothing running means attract mode
 		if not game.active then game.start_demo() end

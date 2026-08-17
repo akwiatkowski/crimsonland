@@ -327,7 +327,14 @@ function comps.draw_button(comp, w, h, r, g, b, a)
 	if icon then
 		local iw, ih = icon:getWidth(), icon:getHeight()
 		local fit = math.min(1, (w - 6) / iw, (h - 6) / ih)
-		love.graphics.setColor(r, g, b, a)
+		-- the icon takes the plate's tint, so dimming a button (a locked perk,
+		-- an unearned achievement) dims what is drawn on it too
+		local bc = p["button.bitmap_color_" .. state]
+		if type(bc) == "table" then
+			love.graphics.setColor(bc[1] or 1, bc[2] or 1, bc[3] or 1, (bc[4] or 1) * a)
+		else
+			love.graphics.setColor(r, g, b, a)
+		end
 		love.graphics.draw(icon, cx, cy, 0, fit, fit, iw / 2, ih / 2)
 	end
 

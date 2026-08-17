@@ -14,6 +14,9 @@ save.game = {
 	survival_best = { score = 0, time = 0, kills = 0 }, -- kept: pre-bests saves
 	bests = {}, -- [mode] = { score, time, kills } for every endless mode
 	seen = { weapons = {}, perks = {} }, -- first sight drives the unlock screens
+	quests_by_difficulty = {}, -- [difficulty]["chapter.quest"] = true
+	quests_flawless = {}, -- cleared without taking a scratch
+	awarded = {}, -- achievement id -> true
 	stats = { -- lifetime totals, the Statistics screen's whole content
 		kills = 0,
 		shots = 0,
@@ -22,6 +25,8 @@ save.game = {
 		quests_won = 0,
 		runs = 0,
 		play_time = 0,
+		blowtorches = 0, -- Smart Pack Rat counts them
+		dens = 0, -- Home Wrecker counts nests destroyed
 	},
 }
 
@@ -74,6 +79,9 @@ function save.load()
 		save.game.survival_best = state.game.survival_best
 			or { score = 0, time = 0, kills = 0 }
 		save.game.bests = state.game.bests or {}
+		save.game.quests_by_difficulty = state.game.quests_by_difficulty or {}
+		save.game.quests_flawless = state.game.quests_flawless or {}
+		save.game.awarded = state.game.awarded or {}
 		local seen = state.game.seen or {}
 		save.game.seen.weapons = seen.weapons or {}
 		save.game.seen.perks = seen.perks or {}
@@ -98,8 +106,18 @@ end
 
 -- ----------------------------------------------------------- game helpers
 
-function save.mark_quest_completed(chapter, quest)
-	save.game.quests_completed[chapter .. "." .. quest] = true
+--- Record a cleared quest. Difficulty and "took no damage" are kept as their
+-- own sets because two achievements ask about them (Club Hardcore, Grim
+-- Reaper, Not a Scratch) and the plain completed set drives unlock gating.
+function save.mark_quest_completed(chapter, quest, difficulty, flawless)
+	local key = chapter .. "." .. quest
+	save.game.quests_completed[key] = true
+	if difficulty and difficulty ~= "NORMAL" then
+		save.game.quests_by_difficulty[difficulty] =
+			save.game.quests_by_difficulty[difficulty] or {}
+		save.game.quests_by_difficulty[difficulty][key] = true
+	end
+	if flawless then save.game.quests_flawless[key] = true end
 	save.flush()
 end
 

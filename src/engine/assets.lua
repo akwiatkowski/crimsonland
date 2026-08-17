@@ -22,6 +22,9 @@ local ROOT_MUSIC = paths.MUSIC
 -- loaded. Quads are the one exception (they address texels and ignore
 -- dpiscale) — see assets.quad().
 local HIRES_SCALE = 1080 / 640
+-- Public because it is also the densest art that exists: anything that
+-- rasterizes into a texture of its own has no reason to go past it.
+assets.HIRES_SCALE = HIRES_SCALE
 
 -- Set by the engine once the render scale is known (src/engine/init.lua).
 -- Below 1x reference the hi-res set only costs VRAM, so it stays off.

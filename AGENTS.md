@@ -137,6 +137,15 @@ NX_SetCursor NX_GetInterface NX_GetTime NX_FileExists NX_Popup NX_CallExtension`
 - `gibs.lua` — body parts from `bm_gibs_unique`/`bm_gibs_common` (four parts
   per sheet, not an animation); thrown on a kill, baked into the terrain
   canvas where they stop, like the corpse
+- `terrain.lua` — the ground, baked from `terrains/terrains.xml`. All ten ops;
+  four are documented in the file's own header and the rest are inferred (each
+  marked INFERRED where it is implemented). `SetSeeds` holds one seed per quest
+  of a chapter, so `bake(id, quest, ...)` is what makes a quest's layout its
+  own and reproducible, and `quest_number_required` gates the later decoration.
+  terrains.xml also carries an array per endless mode (SURVIVAL, RUSH, BLITZ,
+  …) — `terrain_for` in play.lua resolves a mode to its own ground. Bakes are
+  cached (a few, FIFO, released on evict) and capped at the density of the
+  1080p art, because the canvas is 21 MB there and the terrain art is 1x
 - Playfield art notes: `bm_shadow` draws under everything alive (faded out
   over a death); `game/projs.tga` holds four projectile sprites, assigned by
   weapons.xml's own `type`/`flags` in `data.lua`; the `*-stencil.bms` pairs

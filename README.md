@@ -81,6 +81,14 @@ Done:
       block on a frozen creature and the fragments it sheds, and the shield
       ring while the powerup runs
 
+- [x] The ground as it was authored: all ten `terrains.xml` operations
+      (noise-scattered detail, Voronoi trail webs, roads and mech tracks,
+      hand-placed landing pads), each chapter's own seed list so a quest
+      always bakes its own layout, `quest_number_required` so a field gets
+      visibly more fought-over as a chapter goes on, and the per-mode
+      terrains — Rush's beach, Blitz's roads and landing pad — which every
+      endless mode used to replace with chapter 1's grass
+
 Next:
 
 - [ ] Gamepad support (`joystick` is enabled but unused)

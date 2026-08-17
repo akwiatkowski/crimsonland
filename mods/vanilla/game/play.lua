@@ -15,6 +15,7 @@ local input = require("mods.vanilla.game.input")
 local particles = require("mods.vanilla.game.particles")
 local perks = require("mods.vanilla.game.perks")
 local quests = require("mods.vanilla.game.quests")
+local terrain = require("mods.vanilla.game.terrain")
 local customquests = require("mods.vanilla.game.customquests")
 
 local game = {}
@@ -142,79 +143,48 @@ game.POWERUPS = POWERUPS -- the HUD reads icons/durations for effect timers
 
 -- ------------------------------------------------------------ terrain bake
 
--- Baked terrain is expensive (a full-world canvas plus a tiling pass) and gets
--- drawn into during play as gore accumulates. Bake each chapter's clean ground
--- once, then copy it into the session's own canvas — attract mode restarts
--- often enough that re-baking showed up as a visible hitch.
-local clean_terrain = {}
+-- Endless modes have no quest number to decorate the ground from. They read
+-- best as places that have been fought over for a while, so they take the
+-- last quest's worth of blast marks and debris.
+local ENDLESS_TERRAIN_QUEST = 10
 
-local function bake_terrain(chapter_id)
-	if clean_terrain[chapter_id] then
-		local session = love.graphics.newCanvas(WORLD_W, WORLD_H)
-		love.graphics.setCanvas(session)
-		love.graphics.clear(0, 0, 0, 1)
-		love.graphics.setColor(1, 1, 1, 1)
-		love.graphics.draw(clean_terrain[chapter_id], 0, 0)
-		love.graphics.setCanvas()
-		return session
-	end
+--- The session's ground. `quest` decides how scarred it is and, through the
+-- chapter's authored seed list, which of the ten layouts it is.
+local function bake_terrain(terrain_id, quest)
+	-- Deferred require: the engine is what loads the mod, so the game layer
+	-- must not hold a load-time reference back into it.
+	local density = require("src.engine").render_scale()
+	return terrain.bake(terrain_id, quest or ENDLESS_TERRAIN_QUEST,
+		WORLD_W, WORLD_H, density)
+end
 
-	local ops = data.terrains[chapter_id] or data.terrains.CHAPTER_1
-	local rng = love.math.newRandomGenerator(12345)
-	local canvas = love.graphics.newCanvas(WORLD_W, WORLD_H)
-	love.graphics.setCanvas(canvas)
-	love.graphics.clear(0.1, 0.1, 0.08, 1)
-	for _, op in ipairs(ops or {}) do
-		local action = op.action
-		if action == "Clear" then
-			love.graphics.clear(tonumber(op.r) or 0.2, tonumber(op.g) or 0.2, tonumber(op.b) or 0.1, 1)
-		elseif action == "DrawTiled" then
-			local img = assets.image(op.bm)
-			if img then
-				local spacing = tonumber(op.tile_spacing) or 1
-				local scale = tonumber(op.tile_scale) or 1
-				love.graphics.setColor(1, 1, 1, tonumber(op.alpha) or 1)
-				local stepx = img:getWidth() * spacing * scale
-				local stepy = img:getHeight() * spacing * scale
-				local y = 0
-				while y < WORLD_H do
-					local x = 0
-					while x < WORLD_W do
-						love.graphics.draw(img, x, y, 0, scale, scale)
-						x = x + stepx
-					end
-					y = y + stepy
-				end
-			end
-		elseif action == "DrawSplashes" then
-			local img = assets.image(op.bm)
-			if img then
-				local n = tonumber(op.num_splashes) or 10
-				love.graphics.setColor(1, 1, 1, tonumber(op.alpha) or 1)
-				for _ = 1, n do
-					local x = rng:random() * WORLD_W
-					local y = rng:random() * WORLD_H
-					local rot = rng:random() * math.pi * 2
-					love.graphics.draw(img, x, y, rot, 1, 1,
-						img:getWidth() / 2, img:getHeight() / 2)
-				end
-			end
-		end
-		-- DrawWithPerlinNoise / DrawPerlin / FootPrints: skipped (polish)
-	end
-	love.graphics.setColor(1, 1, 1, 1)
-	love.graphics.setCanvas()
-	clean_terrain[chapter_id] = canvas
-	-- the caller draws gore into what it gets back, so hand out a copy
-	return bake_terrain(chapter_id)
+--- Which authored terrain a session is fought on.
+--
+-- terrains.xml does not stop at the seven chapters: it carries an array for
+-- each endless mode too, and they are not decoration. SURVIVAL is chapter 2
+-- as it looks at quest 5, WAVES is chapter 7 at quest 5, RUSH is a beach with
+-- a summoning circle burned into it, BLITZ is chapter 5 with a landing pad,
+-- two roads and four sets of mech tracks. The port used to fight every one of
+-- them on chapter 1's grass.
+local function terrain_for(mode, chapter)
+	local named = mode and data.terrains[mode:upper()]
+	if named then return mode:upper() end
+	return "CHAPTER_" .. (chapter or 1)
 end
 
 -- ------------------------------------------------------------ quest setup
 
--- state shared by every game mode
-local function init_session(terrain_chapter)
+-- state shared by every game mode. The terrain is resolved here rather than
+-- by the caller because terrain_for reads data.terrains, which the load below
+-- is what fills.
+local function init_session(mode, chapter, quest, terrain_override)
 	data.load_all() -- idempotent-ish (cheap enough)
-	game.terrain = bake_terrain("CHAPTER_" .. terrain_chapter)
+	-- The outgoing session's ground is a texture of its own, tens of megabytes
+	-- of it, and nothing else holds a reference: the attract mode starts a new
+	-- session every time its AI dies, so waiting for the collector piles them
+	-- up. (The cached clean bakes it was copied from are not touched.)
+	if game.terrain then game.terrain:release() end
+	game.terrain = bake_terrain(terrain_override or terrain_for(mode, chapter), quest)
 
 	game.player = {
 		x = WORLD_W / 2,
@@ -274,7 +244,7 @@ function game.start_quest(chapter, quest, difficulty)
 	game.chapter = chapter
 	game.quest = quest
 	game.difficulty = difficulty
-	init_session(chapter)
+	init_session("quest", chapter, quest)
 
 	local def = quests.get(chapter, quest)
 	-- highest weapon index that may drop; grows with chapter progress
@@ -310,7 +280,7 @@ function game.start_custom(quest)
 	game.chapter = 1
 	game.quest = 0
 	game.difficulty = "NORMAL"
-	init_session(1)
+	init_session("custom", 1)
 
 	game.custom = quest
 	game.custom_next = 1 -- index into quest.spawns
@@ -356,12 +326,16 @@ local SURVIVAL_WAVES = {
 -- ("MainMenu" pushes GameCrimsonland with parm_demo="MENU_COMBAT_1..5"), so
 -- the menu sits over a session an AI is playing rather than over a still.
 function game.start_demo()
-	game.start_survival("survival", true)
+	-- The backdrop is a chapter of the real game, not the survival field, and
+	-- the chapter has to be picked before the session starts: baking survival's
+	-- ground first and throwing it away cost a full bake on every restart, and
+	-- the attract mode restarts every time its AI dies.
+	local chapter = love.math.random(1, NUM_CHAPTERS)
+	game.start_survival("survival", true, "CHAPTER_" .. chapter)
+	game.chapter = chapter
 	game.no_perks = true -- nothing may interrupt with a UI screen
 	game.spawn_interval = 1.2
 	game.max_concurrent = 10
-	game.chapter = love.math.random(1, NUM_CHAPTERS)
-	game.terrain = bake_terrain("CHAPTER_" .. game.chapter)
 	-- attract mode should look like someone playing well, and the starting
 	-- pistol caps out at 1.4 shots/s; each demo draws a different gun, which
 	-- is also what the original's five MENU_COMBAT setups were for
@@ -376,7 +350,9 @@ function game.start_demo()
 	audio.duck = 0.25
 end
 
-function game.start_survival(mode, demo)
+--- `terrain_override` names an authored terrain to bake instead of the
+-- mode's own -- the attract mode uses it to fight on a chapter.
+function game.start_survival(mode, demo, terrain_override)
 	game.demo = demo or false
 	input.set_controller(nil)
 	audio.duck = 1
@@ -384,7 +360,7 @@ function game.start_survival(mode, demo)
 	game.chapter = 1
 	game.quest = 0
 	game.difficulty = "NORMAL"
-	init_session(1)
+	init_session(game.mode, 1, nil, terrain_override)
 
 	game.kills_goal = nil -- endless: it ends when you do
 	game.diff_mul = 1

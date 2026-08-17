@@ -830,8 +830,10 @@ local function update_player(game, dt)
 			-- Living Fortress: "you do more damage ... the longer you stand still"
 			local stand_dmg = 1 + game.mods.stand_ramp * ((p.still_t or 0) / RAMP_FULL)
 			for _ = 1, w.num_projectiles do
-				local spread = (love.math.random() - 0.5) * w.recoil * 2
-				local a = p.angle + spread
+				-- somewhere in the cone this gun's accuracy rating earns it
+				-- (game/data.lua), which for a pellet gun is where the fan
+				-- comes from and for a rifle is a barely visible wander
+				local a = p.angle + (love.math.random() - 0.5) * 2 * w.spread
 				game.bullets[#game.bullets + 1] = {
 					x = p.x + math.cos(p.angle) * 20,
 					y = p.y + math.sin(p.angle) * 20,
@@ -926,7 +928,7 @@ function damage_creature(game, c, dmg)
 		c.die_t = 0
 		-- freeze facing so the gore anim + baked corpse keep it
 		c.rot = c.fixed_rot
-			or math.atan2(game.player.y - c.y, game.player.x - c.x) + math.pi / 2
+			or math.atan2(game.player.y - c.y, game.player.x - c.x)
 		particles.death_burst(c.x, c.y, c.variant.scale)
 		-- what it emptied onto the ground, under where it came apart
 		for _ = 1, 3 do
@@ -1549,15 +1551,25 @@ local function update_ebullets(game, dt)
 	end
 end
 
+--- The UI screen sitting over a live session, if any (PickAPerk, PerkUnlocked,
+-- LevelCompleted, ...). While one is up the pointer belongs to the UI rather
+-- than to the gun, which is what pauses gameplay, stands the crosshair down and
+-- hands the OS cursor back. The demo is the thing menus are drawn ON, so it is
+-- never "under" a screen in this sense.
+function game.ui_screen()
+	if game.demo then return nil end
+	local top = require("src.engine.screens").top()
+	if top and top.name ~= "GameCrimsonland" then return top end
+	return nil
+end
+
 function game.update(dt)
 	if not game.active then return end
 
 	-- gameplay pauses whenever a UI screen overlays the game
 	-- (PickAPerk, LevelCompleted, ...); keep the perk preview live
-	-- the demo is the thing menus are drawn ON, so it keeps running under them
-	local screens = require("src.engine.screens")
-	local top = screens.top()
-	if top and top.name ~= "GameCrimsonland" and not game.demo then
+	local top = game.ui_screen()
+	if top then
 		if top.name == "PickAPerk" then
 			update_perk_hover(top)
 		elseif top.name == "PlayMenuCustomQuests" then
@@ -1838,8 +1850,12 @@ local function draw_creature(game, c)
 		if seq then
 			frame = math.floor(c.anim_t * 24 * (def.move_speed or 1)) + 1
 		end
+		-- Creature art faces +X (the lizard's snout, the spider's mandibles and
+		-- the zombie's arms all point right in their frames), so the angle to
+		-- the player is the rotation as-is. The quarter turn the player wears
+		-- (game.draw) is the trooper's own convention: that art faces -Y.
 		rot = c.fixed_rot -- dens/nests don't track the player
-			or math.atan2(game.player.y - c.y, game.player.x - c.x) + math.pi / 2
+			or math.atan2(game.player.y - c.y, game.player.x - c.x)
 	end
 
 	local tr, tg, tb = state_tint(game, c)
@@ -2019,8 +2035,10 @@ end
 
 function game.draw()
 	-- the crosshair replaces the OS cursor while a session runs; the demo is
-	-- not being played by the person holding the mouse, so they keep theirs
-	love.mouse.setVisible(not game.active or game.demo)
+	-- not being played by the person holding the mouse, so they keep theirs.
+	-- A UI screen over the session (PickAPerk, PerkUnlocked, ...) gives the
+	-- pointer back too: without it there is nothing to aim the click with.
+	love.mouse.setVisible(not game.active or game.demo or game.ui_screen() ~= nil)
 	if not game.active then
 		-- menu backdrop
 		love.graphics.setColor(0.05, 0.02, 0.03, 1)

@@ -27,12 +27,24 @@ local function report_choices()
 	end
 end
 
-local function dismiss_unlocks()
+local function report_stack()
 	local screens = require("src.engine.screens")
-	local top = screens.top()
-	if top then
-		require("mods.vanilla.game.unlocks").on_click(top.name)
+	local names = {}
+	for i, s in ipairs(screens.stack) do
+		names[i] = s.name .. (s.leaving and "(leaving)" or "")
 	end
+	-- the pointer has to be visible while a screen is up: these are clicked,
+	-- not aimed, and the in-game crosshair stands down under them
+	print(("[test] stack: %s (cursor visible=%s)"):format(
+		table.concat(names, " > "), tostring(love.mouse.isVisible())))
+end
+
+--- The unlock celebration on demand. Whether a pick earns one depends on the
+-- profile — the save remembers first sight, so it happens once ever — and what
+-- this scenario checks is that it can be left, so it is raised rather than
+-- waited for.
+local function show_unlock()
+	require("mods.vanilla.game.unlocks").show("PerkUnlocked", 1)
 end
 
 local function report_taken()
@@ -52,21 +64,25 @@ return {
 	{ t = 4.0, click = "Play_Quests" },
 	{ t = 5.5, click = "Chapter_1" },
 	{ t = 7.0, click = "Quest_1" },
+	-- playing: the crosshair is the pointer, so the OS cursor is gone
+	{ t = 8.5, run = report_stack },
 	{ t = 9.0, run = grant_level },
 	{ t = 9.5, run = report_choices },
 	{ t = 10.5, click = "PerkButton_1" },
 	{ t = 11.0, run = report_taken },
-	-- Taking a perk for the first time earns its unlock celebration, and a
-	-- perk that hands you a weapon earns the weapon's too. Those screens carry
-	-- no button — any click dismisses — so the scenario dismisses them the way
-	-- the game does rather than clicking a comp that is not there.
-	{ t = 11.5, run = dismiss_unlocks },
-	{ t = 12.0, run = dismiss_unlocks },
+	-- Taking a perk for the first time earns its unlock celebration. That
+	-- screen carries no button and every plate on it is inactive, so the only
+	-- way out is a click anywhere — which is what clicking dead space below
+	-- the grid, where no comp lives, proves.
+	{ t = 11.4, run = show_unlock },
+	{ t = 11.8, run = report_stack },
+	{ t = 12.0, click_at = { 60, 600 } },
+	{ t = 12.5, run = report_stack },
 	-- a second level, to prove an owned perk is not offered twice and that
 	-- two perks stack on the same mods table
 	{ t = 13.0, run = grant_level },
 	{ t = 13.5, run = report_choices },
 	{ t = 14.5, click = "PerkButton_1" },
 	{ t = 15.0, run = report_taken },
-	captures = { 9.8, 15.2 },
+	captures = { 9.8, 11.9, 15.2 },
 }

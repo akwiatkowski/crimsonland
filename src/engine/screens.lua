@@ -416,6 +416,10 @@ function screens.mousepressed(x, y, button)
 			end
 		end
 	end
+	-- a click that landed on no comp still reaches the mod, with an empty comp
+	-- name: the unlock celebrations carry no button at all and the C++ side
+	-- dismissed them on any click, anywhere on the screen
+	require("src.engine.mod").game_call("on_ui_click", top.name, "")
 end
 
 screens.WIDTH = 960

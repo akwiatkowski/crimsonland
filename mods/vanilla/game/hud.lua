@@ -47,6 +47,9 @@ end
 --- Crosshair at the mouse (reference coords): the original aim circle and
 -- dot; while reloading the dot swaps and an arc sweeps the circle closed.
 function hud.draw_cursor(game)
+	-- a UI screen over the session owns the pointer: the OS cursor is back
+	-- (play.game.draw) and this one would only sit frozen where aiming stopped
+	if game.ui_screen() then return end
 	local p = game.player
 	-- follow the aim point rather than the mouse: whoever is playing (human,
 	-- AI demo, test) moves the crosshair

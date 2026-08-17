@@ -32,6 +32,43 @@ data.weapon_order = {} -- by numeric index
 -- weapon nothing in the XML distinguishes, so it goes by id: the sheet has a
 -- spinning blade on it and only one weapon throws blades.
 local PLASMA_FLAG = 16
+-- Bit 0 of the same field is "ejects brass". Dumping id/type/flags across all
+-- 38 weapons puts it on exactly the cased-ammunition guns -- pistol, rifles,
+-- shotguns, the gauss family, the jackhammer -- and off every flamethrower,
+-- rocket, energy weapon, the blade gun and the bubblegun, which is the split
+-- a casing makes physical sense for.
+local BRASS_FLAG = 1
+
+-- Widest half-angle a shot leaves the barrel at, in degrees, for a weapon with
+-- an accuracy rating of zero: what a single round wanders by, and the much
+-- wider fan a pellet gun lays its shot across. Everything in between falls out
+-- of the weapon's own stat_accuracy (see spread_of), which puts the Gauss Gun
+-- at 0.1 degrees, the Pistol at 1.6, the Assault Rifle at 4.9, the Mean
+-- Minigun at 8.1, the Shotgun's 12 pellets across a 36-degree cone and the
+-- Sawed-off's across 50 -- the original's own ordering of its guns.
+local AIM_WANDER_DEG = 10
+local PELLET_CONE_DEG = 28
+
+--- Half-angle of a weapon's spread cone, in radians.
+--
+-- The XML ships two numbers that look like they could drive this and only one
+-- that does. `recoil` is the kick -- it tracks how much gun there is (Ion
+-- Cannon 0.68, Plasma Cannon 0.6, Gauss Gun 0.42, Pulse Gun 0), so firing
+-- along it made the railgun and the pistol the least accurate weapons in the
+-- game and the sawed-off shotgun tighter than the full one. `stat_accuracy` is
+-- the precision rating -- the bar the weapon gallery draws -- and it orders the
+-- guns the way playing them does: Gauss Gun 0.9, Blade Gun 0.89, Pistol 0.6,
+-- Assault Rifle 0.3, Mean Minigun 0.1, Sawed-off 0.05.
+--
+-- Squaring what is missing from that rating keeps the top of the range sharp
+-- (a 0.9 gun is effectively hitscan-accurate) while the bottom sprays, and
+-- spreads the shotguns apart: 0.2 and 0.05 are close as ratings and far apart
+-- as cones, which is what tells the two of them apart in the hand.
+local function spread_of(w)
+	local miss = (1 - math.max(0, math.min(1, w.stat_accuracy))) ^ 2
+	local widest = w.num_projectiles > 1 and PELLET_CONE_DEG or AIM_WANDER_DEG
+	return math.rad(widest * miss)
+end
 
 local function projectile_art(id, wtype, flags)
 	if id == "BLADE_GUN" then return "blade" end
@@ -57,12 +94,12 @@ function data.load_weapons()
 			snd_reload = a.snd_reload,
 			shoot_interval = to_num(a.shoot_interval, 0.5),
 			reload_time = to_num(a.reload_time, 1),
-			recoil = to_num(a.recoil, 0.1),
 			num_projectiles = to_num(a.num_projectiles, 1),
 			projectile_speed = to_num(a.projectile_speed, 50),
 			projectile_damage = to_num(a.projectile_damage, 1),
 			projectile_range = to_num(a.projectile_range, 300),
 			stat_damage = to_num(a.stat_damage, 0.3),
+			stat_accuracy = to_num(a.stat_accuracy, 0.3),
 			icon = a.bm_icon and ("weapons/" .. a.bm_icon) or nil,
 			ammo_icon = a.ammo_icon,
 		}
@@ -78,7 +115,10 @@ function data.load_weapons()
 			w.damage_effective = 19.2 * w.stat_damage * w.shoot_interval
 				/ math.max(1, w.num_projectiles)
 		end
-		w.proj_art = projectile_art(w.id, to_num(a.type, 0), to_num(a.flags, 0))
+		w.spread = spread_of(w)
+		local flags = to_num(a.flags, 0)
+		w.proj_art = projectile_art(w.id, to_num(a.type, 0), flags)
+		w.brass = math.floor(flags / BRASS_FLAG) % 2 == 1
 		data.weapons[w.id] = w
 		data.weapon_order[w.index] = w
 	end

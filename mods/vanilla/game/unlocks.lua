@@ -18,7 +18,10 @@ local save = require("mods.vanilla.game.save")
 local unlocks = {}
 
 local BRASS = { 0.85, 0.68, 0.28, 1 }
+local DIM = { 0.7, 0.7, 0.7, 0.8 }
 local F_MEDIUM = "fonts/medium.mft"
+local F_SMALL = "fonts/small.mft"
+local DISMISS = "Click anywhere to continue"
 
 local SCREENS = {
 	WeaponUnlocked = {
@@ -75,7 +78,10 @@ function unlocks.draw(screen_name, screen)
 	local px, py, pw, ph = comps.screen_rect(panel)
 	local name = entry.name or ""
 	font.draw(F_MEDIUM, name, px + (pw - font.measure(F_MEDIUM, name)) / 2,
-		py + ph - 70, BRASS)
+		py + ph - 78, BRASS)
+	-- the screen has no button to leave by, so it has to say how you leave
+	font.draw(F_SMALL, DISMISS, px + (pw - font.measure(F_SMALL, DISMISS)) / 2,
+		py + ph - 50, DIM)
 end
 
 --- These screens carry no button at all: any click dismisses.

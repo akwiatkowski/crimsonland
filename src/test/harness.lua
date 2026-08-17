@@ -18,6 +18,14 @@ local comps = require("src.engine.comps")
 --- Click the center of a named comp on the top screen. The scenario speaks
 -- reference coordinates (960x640); screens.mousepressed expects window
 -- pixels, so replicate the engine's viewport math in reverse.
+function harness.click_at(rx, ry)
+	local ww, wh = love.graphics.getDimensions()
+	local scale = math.min(ww / screens.WIDTH, wh / screens.HEIGHT)
+	local ox = (ww - screens.WIDTH * scale) / 2
+	local oy = (wh - screens.HEIGHT * scale) / 2
+	screens.mousepressed(rx * scale + ox, ry * scale + oy, 1)
+end
+
 function harness.click(name)
 	local top = screens.top()
 	local comp = top and top.compmap[name]
@@ -26,11 +34,7 @@ function harness.click(name)
 		return
 	end
 	local x, y, w, h = comps.screen_rect(comp)
-	local ww, wh = love.graphics.getDimensions()
-	local scale = math.min(ww / screens.WIDTH, wh / screens.HEIGHT)
-	local ox = (ww - screens.WIDTH * scale) / 2
-	local oy = (wh - screens.HEIGHT * scale) / 2
-	screens.mousepressed((x + w / 2) * scale + ox, (y + h / 2) * scale + oy, 1)
+	harness.click_at(x + w / 2, y + h / 2)
 end
 
 function harness.key(k)
@@ -198,6 +202,9 @@ function harness.install(scenario_name)
 			if not (step and elapsed >= step.t) then break end
 			step_idx = step_idx + 1
 			if step.click then harness.click(step.click) end
+			-- {x, y} in reference coords: for screens that answer a click
+			-- anywhere rather than a click on a comp (the unlock celebrations)
+			if step.click_at then harness.click_at(step.click_at[1], step.click_at[2]) end
 			if step.key then harness.key(step.key) end
 			if step.text then harness.text(step.text) end
 			-- escape hatch for subsystems a player cannot reach from input

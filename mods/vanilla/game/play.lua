@@ -41,6 +41,10 @@ local MAX_CREATURES = 90 -- hard cap so den spawners can't flood the world
 
 local DIFFICULTY = { NORMAL = 1.0, HARDCORE = 1.5, GRIM = 2.0 }
 
+-- Seconds of unbroken running (or standing) at which a ramping perk reaches
+-- its full value. Long enough that it is a commitment, short enough to feel.
+local RAMP_FULL = 6
+
 -- The pak ships eight music files and prog.dll names seven of them, in one
 -- fixed table of 20-byte slots (offset 1151836, ending exactly where the sfx
 -- strings begin). Two of the seven have a documented home in the shipped
@@ -91,6 +95,26 @@ local EXPLOSIVE = {
 }
 local FLAME = { FLAMETHROWER = true, BLOW_TORCH = true, HR_FLAMER = true }
 
+-- Two perks name a weapon class rather than a stat: Pyromaniac buffs "fire and
+-- plasma based weapons", Ion Gun Master "ion weapons". The rosters come
+-- straight off the weapon ids in weapons.xml.
+local PLASMA = {
+	PLASMA_RIFLE = true, MULTI_PLASMA = true, PLASMA_MINIGUN = true,
+	PLASMA_SHOTGUN = true, PLASMA_CANNON = true, PULSE_GUN = true,
+}
+local ION = {
+	ION_RIFLE = true, ION_MINIGUN = true, ION_CANNON = true,
+	ION_SHOTGUN = true, MULTI_ION = true,
+}
+
+-- Cost of a shot fired on an empty clip (Regression Ammo pays points,
+-- Ammunition Within pays health -- "drawn from your health").
+local EMPTY_FIRE_POINTS = 250
+local EMPTY_FIRE_HP = 2
+
+-- How close an infected creature has to be to pass Plaguebearer's disease on.
+local PLAGUE_SPREAD = 70
+
 local DROP_WEAPON_CHANCE = 0.08
 local DROP_HEALTH_CHANCE = 0.06
 local DROP_POWERUP_CHANCE = 0.05
@@ -105,6 +129,10 @@ local POWERUPS = {
 	{ id = "DOUBLE_POINTS", icon = "powerups/powerup-double-points.png", dur = 12, snd = "sfx/unlocked" },
 	{ id = "SPEED", icon = "powerups/powerup-move-speed.png", dur = 8, snd = "sfx/unlocked" },
 	{ id = "FIRE_BULLETS", icon = "powerups/powerup-fire-bullets.png", dur = 10, snd = "sfx/unlocked" },
+	-- "You get more time to react as the game slows down" (prog.dll's own
+	-- powerup table). Added with the perks, because Slow Time, High Damage
+	-- exists only to be paired with it.
+	{ id = "REFLEX_BOOST", icon = "powerups/powerup-reflex-boost.png", dur = 8, snd = "sfx/unlocked" },
 }
 local POWERUP_BY_ID = {}
 for _, pu in ipairs(POWERUPS) do POWERUP_BY_ID[pu.id] = pu end
@@ -429,7 +457,9 @@ local function add_creature(game, variant, x, y, is_boss)
 		def = data.creatures[variant.type],
 		x = x,
 		y = y,
-		hp = variant.health * game.health_mul * (is_boss and quests.BOSS_HP_MUL or 1),
+		-- Bad Blood leaves them with less health to spend
+		hp = variant.health * game.health_mul * game.mods.creature_hp
+			* (is_boss and quests.BOSS_HP_MUL or 1),
 		anim_t = love.math.random() * 2,
 		attack_cd = 0,
 		is_boss = is_boss or nil,
@@ -537,10 +567,13 @@ end
 
 -- --------------------------------------------------------- perk choosing
 
---- effective clip size with perk modifiers (0 when unarmed: nukefism)
+--- effective clip size with perk modifiers (0 when unarmed: nukefism).
+-- Ammo Maniac scales it; Sharpshooter and My Favourite Weapon add flat rounds.
 function game.clip_size()
 	local w = game.player.weapon
-	return w and math.floor(w.clip_size * game.mods.clip + 0.5) or 0
+	if not w then return 0 end
+	return math.max(1,
+		math.floor(w.clip_size * game.mods.clip + 0.5) + game.mods.clip_add)
 end
 
 local function set_perk_desc(screen, perk)
@@ -570,11 +603,17 @@ local function open_perk_screen(game)
 		comps.set(s.compmap.Title, "textbox.text",
 			{ ("Level %d - Pick a Perk"):format(game.level) })
 	end
-	for i = 1, 5 do
+	-- Six plates, because the layout ships six — which is Perk Master's "you
+	-- can now select between SIX perks", and why the port's old five was wrong.
+	for i = 1, 6 do
 		local b = s.compmap["PerkButton_" .. i]
 		if b then
 			if choices[i] then
-				comps.set(b, "button.text", { choices[i].name })
+				-- icon only: the name and description belong to the pair of
+				-- textboxes below, which follow the pointer. Writing the name
+				-- onto the plate as well was survivable while the names were
+				-- invented and short, and unreadable once they were the
+				-- original's ("Lean Mean Exp Machine" across a 60px plate).
 				comps.set(b, "button.bm_icon", { choices[i].icon })
 				comps.set(b, "visible", { true })
 			else
@@ -600,9 +639,23 @@ local function update_player(game, dt)
 	local want = input.intent(game, dt)
 	local dx, dy = want.dx, want.dy
 	p.moving = (dx ~= 0 or dy ~= 0)
+
+	-- Two perks build while you keep doing the same thing: Long Distance Runner
+	-- ("faster the longer you run without stopping") and Living Fortress ("more
+	-- damage and take in less damage the longer you stand still"). Each timer
+	-- resets the other, and both saturate at RAMP_FULL seconds.
+	if p.moving then
+		p.run_t = math.min(RAMP_FULL, (p.run_t or 0) + dt)
+		p.still_t = 0
+	else
+		p.still_t = math.min(RAMP_FULL, (p.still_t or 0) + dt)
+		p.run_t = 0
+	end
+
 	if p.moving then
 		local len = math.sqrt(dx * dx + dy * dy)
 		local speed = p.speed * game.mods.speed
+			* (1 + game.mods.run_ramp * (p.run_t / RAMP_FULL))
 			* (game.effects.SPEED and 1.5 or 1)
 		p.x = math.max(16, math.min(WORLD_W - 16, p.x + dx / len * speed * dt))
 		p.y = math.max(16, math.min(WORLD_H - 16, p.y + dy / len * speed * dt))
@@ -647,16 +700,32 @@ local function update_player(game, dt)
 		p.reloading = p.weapon.reload_time * game.mods.reload
 		p.reload_total = p.reloading -- HUD sweeps the crosshair arc from this
 		audio.play_sound(p.weapon.snd_reload)
+		-- Stationary Reloader: "monsters around you may also freeze when you
+		-- start reloading"
+		if game.mods.freeze_on_reload > 0 and love.math.random() < 0.5 then
+			game.effects.FREEZE = math.max(game.effects.FREEZE or 0,
+				game.mods.freeze_on_reload)
+		end
 	end
 
 	if want.fire and p.reloading <= 0 and p.cooldown <= 0 then
-		if p.ammo <= 0 then
+		-- Regression Ammo and Ammunition Within both fire on an empty clip;
+		-- they differ only in what the shot costs you.
+		local dry = p.ammo <= 0
+		if dry and not game.mods.empty_fire then
 			p.reloading = p.weapon.reload_time * game.mods.reload
 			p.reload_total = p.reloading
 			audio.play_sound(p.weapon.snd_reload)
 		else
+			if dry then
+				if game.mods.empty_fire == "health" then
+					p.hp = p.hp - EMPTY_FIRE_HP
+				else
+					game.score = math.max(0, game.score - EMPTY_FIRE_POINTS)
+				end
+			end
 			p.cooldown = p.weapon.shoot_interval / game.mods.fire
-			p.ammo = p.ammo - 1
+			p.ammo = math.max(0, p.ammo - 1)
 			p.muzzle = 0.05
 			audio.play_sound(p.weapon.snd_fire, 1, 0, 1 + (love.math.random() - 0.5) / 6)
 			-- brass, on the original's own emitter parameters and shell art
@@ -669,6 +738,19 @@ local function update_player(game, dt)
 			-- the XML range (rockets detonate when they run out)
 			local range = w.projectile_range * RANGE_SCALE
 			if FLAME[w.id] then range = range * 0.18 end
+			-- Pyromaniac and Ion Gun Master are per-class: they only touch the
+			-- weapons their text names, so the class tables decide who benefits
+			local class_dmg, class_range = 1, 1
+			if FLAME[w.id] or PLASMA[w.id] then
+				class_dmg, class_range = game.mods.fire_dmg, game.mods.fire_range
+			elseif ION[w.id] then
+				class_dmg = game.mods.ion_dmg
+			end
+			range = range * class_range
+			-- Slow Time, High Damage pays off only while Reflex is running
+			local reflex_dmg = game.effects.REFLEX_BOOST and game.mods.reflex_dmg or 1
+			-- Living Fortress: "you do more damage ... the longer you stand still"
+			local stand_dmg = 1 + game.mods.stand_ramp * ((p.still_t or 0) / RAMP_FULL)
 			for _ = 1, w.num_projectiles do
 				local spread = (love.math.random() - 0.5) * w.recoil * 2
 				local a = p.angle + spread
@@ -677,9 +759,11 @@ local function update_player(game, dt)
 					y = p.y + math.sin(p.angle) * 20,
 					dx = math.cos(a),
 					dy = math.sin(a),
-					speed = w.projectile_speed * BULLET_SPEED_SCALE,
+					-- Barrel Greaser: "more speed, more damage"
+					speed = w.projectile_speed * BULLET_SPEED_SCALE * game.mods.bullet_speed,
 					dist_left = range * (FLAME[w.id] and (0.6 + love.math.random() * 0.4) or 1),
 					damage = w.damage_effective * game.mods.dmg
+						* class_dmg * reflex_dmg * stand_dmg
 						* (game.effects.FIRE_BULLETS and 2 or 1),
 					explosive = EXPLOSIVE[w.id] or nil,
 					flame = FLAME[w.id] or nil,
@@ -693,10 +777,19 @@ end
 local damage_creature -- forward declaration: nuke pickups kill via drops code
 
 -- roll the drop table where a creature died
+--- Put a random powerup on the ground. Shared by the kill drop table and by
+-- Out of Thin Air, which conjures them with nothing having died.
+local function drop_powerup(game, x, y)
+	local pu = POWERUPS[love.math.random(#POWERUPS)]
+	game.drops[#game.drops + 1] = { kind = "powerup", powerup = pu, x = x, y = y, t = 0 }
+end
+
 local function try_drop(game, x, y)
 	if game.no_drops then return end -- rush: no help is coming
 	local roll = love.math.random()
-	if roll < DROP_WEAPON_CHANCE and not game.no_weapon_drops then
+	-- My Favourite Weapon: "no more random weapon powerups"
+	if roll < DROP_WEAPON_CHANCE and not game.no_weapon_drops
+		and not game.mods.no_random_weapon then
 		-- random weapon up to the current cap, never the one in hand
 		local pool = {}
 		for idx = 2, game.weapon_cap do
@@ -710,9 +803,8 @@ local function try_drop(game, x, y)
 	elseif roll < DROP_WEAPON_CHANCE + DROP_HEALTH_CHANCE then
 		game.drops[#game.drops + 1] = { kind = "health", x = x, y = y, t = 0 }
 	elseif roll < DROP_WEAPON_CHANCE + DROP_HEALTH_CHANCE
-		+ DROP_POWERUP_CHANCE * game.mods.powerup_drop then -- Bonus Magnet
-		local pu = POWERUPS[love.math.random(#POWERUPS)]
-		game.drops[#game.drops + 1] = { kind = "powerup", powerup = pu, x = x, y = y, t = 0 }
+		+ DROP_POWERUP_CHANCE * game.mods.powerup_drop then -- Lucky
+		drop_powerup(game, x, y)
 	end
 end
 
@@ -729,8 +821,16 @@ local function activate_powerup(game, pu)
 			end
 		end
 	else
-		-- Bonus Economist stretches every timed effect
-		game.effects[pu.id] = pu.dur * game.mods.bonus_time
+		-- Bonus Economist stretches every timed effect; Slow Time, High Damage
+		-- pays for its quad damage by halving Reflex Boost specifically
+		local dur = pu.dur * game.mods.bonus_time
+		if pu.id == "REFLEX_BOOST" then dur = dur * game.mods.reflex_time end
+		game.effects[pu.id] = dur
+	end
+
+	-- Man Bomb: "each time you pick up a power up, you go boom"
+	if game.mods.bomb_on_pickup then
+		game.explode_at(game.player.x, game.player.y, 30)
 	end
 end
 
@@ -755,7 +855,8 @@ function damage_creature(game, c, dmg)
 			game.bosses_alive = game.bosses_alive - 1
 			print("[game] boss down!")
 		end
-		local points_mul = game.effects.DOUBLE_POINTS and 2 or 1
+		-- Bloody Mess pays more points, Death Clock doubles them while it runs
+		local points_mul = (game.effects.DOUBLE_POINTS and 2 or 1) * game.mods.score_mul
 		game.score = game.score + c.variant.xp * points_mul
 		if not game.no_perks then -- rush: score only, no levelling
 			game.xp = game.xp + c.variant.xp * game.mods.xp * points_mul
@@ -788,6 +889,175 @@ local function explode(game, x, y, base_damage)
 		if dist < reach then
 			local falloff = 1 - 0.7 * (dist / reach)
 			damage_creature(game, c, base_damage * 2 * falloff)
+		end
+	end
+end
+
+--- How fast the world runs relative to the player. Reflex Boosted (the perk)
+-- and Reflex Boost (the powerup) both slow everything but you, which is what
+-- "you get more time to react" means from the inside.
+local function world_rate(game)
+	return game.mods.time_scale * (game.effects.REFLEX_BOOST and 0.55 or 1)
+end
+
+-- ------------------------------------------------------- perk-driven actions
+--
+-- Several perks do something once, at the moment they are taken, rather than
+-- setting a modifier. They reach the game through these.
+
+--- A blast at a point, for perks rather than ordnance (Man Bomb, Hot Tempered).
+function game.explode_at(x, y, damage)
+	explode(game, x, y, damage)
+end
+
+--- One attack landing on the player. Six perks meet here, so they meet in one
+-- place rather than at each of the two call sites (a bite and a projectile).
+-- Returns true if it actually cost health, which is what draws blood.
+function game.on_attacked(raw)
+	local mods, p = game.mods, game.player
+
+	-- Dodger and Ninja: the hit simply misses
+	if love.math.random() < mods.dodge then return false end
+
+	-- Cold-blooded: "everyone around you gets frozen solid whenever a monster
+	-- scratches or bites you" — it triggers on the attack, dodged or not
+	if mods.freeze_on_hit > 0 then
+		game.effects.FREEZE = math.max(game.effects.FREEZE or 0, mods.freeze_on_hit)
+	end
+
+	-- Highlander: no damage ever, but each attack is a roll against dying
+	if mods.death_chance > 0 then
+		if love.math.random() < mods.death_chance then
+			p.hp = 0
+			return true
+		end
+		return false
+	end
+
+	local taken = mods.taken
+	-- Tough Reloader takes nothing while reloading
+	if p.reloading > 0 then taken = taken * mods.reload_guard end
+	-- Living Fortress: the longer you have stood still, the less it hurts
+	if mods.stand_ramp > 0 then
+		taken = taken * (1 - mods.stand_ramp * ((p.still_t or 0) / RAMP_FULL))
+	end
+	if taken <= 0 then return false end
+
+	p.hp = p.hp - raw * taken
+	return true
+end
+
+--- Random Weapon: "here, have this weapon. No questions asked."
+function game.give_random_weapon()
+	local order = data.weapon_order
+	local cap = math.min(#order, game.weapon_cap or #order)
+	local w = order[love.math.random(1, math.max(1, cap))]
+	if not w then return end
+	game.player.weapon = w
+	game.player.ammo = game.clip_size()
+	game.player.reloading = 0
+	require("mods.vanilla.game.unlocks").saw_weapon(w)
+end
+
+--- Breathing Room: "the killing of every single creature on the screen"
+function game.kill_everything()
+	for _, c in ipairs(game.creatures) do
+		if not c.dying then
+			particles.explosion(c.x, c.y, 50)
+			damage_creature(game, c, 1e6)
+		end
+	end
+	audio.play_sound("sfx/explosion_nuke")
+end
+
+--- Everything a perk does on a timer or in a radius, once per frame.
+local function update_perks(game, dt)
+	local mods, p = game.mods, game.player
+	local aura = math.max(mods.aura_radius, mods.plague > 0 and 110 or 0)
+
+	if aura > 0 and (mods.aura_dmg > 0 or mods.plague > 0) then
+		for _, c in ipairs(game.creatures) do
+			if not c.dying then
+				local ddx, ddy = c.x - p.x, c.y - p.y
+				if ddx * ddx + ddy * ddy < aura * aura then
+					-- Radioactive burns what stands near you...
+					if mods.aura_dmg > 0 then
+						damage_creature(game, c, mods.aura_dmg * dt)
+					end
+					-- ...Plaguebearer infects it, and infection travels
+					if mods.plague > 0 then c.infected = true end
+				end
+			end
+		end
+	end
+
+	-- Plaguebearer's contagion. The original notes that monsters build
+	-- resistance "once in a while"; this port has no such state, so the
+	-- infection simply persists -- a simplification, not a reading of the text.
+	if mods.plague > 0 then
+		for _, c in ipairs(game.creatures) do
+			if c.infected and not c.dying then
+				damage_creature(game, c, mods.plague * dt)
+				for _, o in ipairs(game.creatures) do
+					if not o.infected and not o.dying then
+						local ddx, ddy = o.x - c.x, o.y - c.y
+						if ddx * ddx + ddy * ddy < PLAGUE_SPREAD * PLAGUE_SPREAD then
+							o.infected = true
+						end
+					end
+				end
+			end
+		end
+	end
+
+	-- Jinxed: "creatures just drop dead and accidents happen"
+	if mods.jinx > 0 and #game.creatures > 0 then
+		game.jinx_t = (game.jinx_t or 0) + dt * mods.jinx
+		while game.jinx_t >= 1 do
+			game.jinx_t = game.jinx_t - 1
+			local c = game.creatures[love.math.random(1, #game.creatures)]
+			if c and not c.dying then
+				particles.death_burst(c.x, c.y, c.variant.scale)
+				damage_creature(game, c, 1e6)
+			end
+		end
+	end
+
+	-- Hot Tempered: "you need to let it out once in a while"
+	if mods.temper > 0 then
+		game.temper_t = (game.temper_t or mods.temper) - dt
+		if game.temper_t <= 0 then
+			game.temper_t = mods.temper
+			game.explode_at(p.x, p.y, 26)
+		end
+	end
+
+	-- Fire Cough: "a fireball stuck in your throat. Repeatedly."
+	if mods.cough > 0 then
+		game.cough_t = (game.cough_t or mods.cough) - dt
+		if game.cough_t <= 0 then
+			game.cough_t = mods.cough
+			game.bullets[#game.bullets + 1] = {
+				x = p.x + math.cos(p.angle) * 20,
+				y = p.y + math.sin(p.angle) * 20,
+				dx = math.cos(p.angle),
+				dy = math.sin(p.angle),
+				speed = 460,
+				dist_left = 420,
+				damage = 30 * mods.dmg,
+				fire = true,
+			}
+		end
+	end
+
+	-- Out of Thin Air: powerups turn up "even without blood being spilled"
+	if mods.field_powerup > 0 and not game.no_drops then
+		game.thin_air_t = (game.thin_air_t or mods.field_powerup) - dt
+		if game.thin_air_t <= 0 then
+			game.thin_air_t = mods.field_powerup
+			drop_powerup(game,
+				love.math.random(80, WORLD_W - 80),
+				love.math.random(80, WORLD_H - 80))
 		end
 	end
 end
@@ -922,7 +1192,10 @@ local function update_creatures(game, dt)
 			local v = c.variant
 			local dx, dy = p.x - c.x, p.y - c.y
 			local dist = math.sqrt(dx * dx + dy * dy)
-			local speed = v.speed * SPEED_SCALE
+			-- Bad Blood slows them; Reflex Boost (perk or powerup) slows the
+			-- whole world, which for a creature is the same thing
+			local speed = v.speed * SPEED_SCALE * game.mods.creature_speed
+				* world_rate(game)
 
 			-- movement by XML ai type. Dens/nests are stationary spawners
 			-- regardless of their nominal ai; IDLE stands its ground;
@@ -984,22 +1257,20 @@ local function update_creatures(game, dt)
 				end
 			end
 
-			-- contact damage (perks: Thick Skinned, Tough Reloader, Radioactive)
+			-- contact damage (Thick Skinned, Tough Reloader, Dodger, Highlander,
+			-- Cold-blooded, Living Fortress, Mr. Melee)
 			local touch = 16 * v.scale + 14
 			if dist < touch then
 				if c.attack_cd <= 0 and not game.effects.SHIELD
 					and v.damage > 0 then
 					c.attack_cd = 0.8
-					local taken = game.mods.taken
-					if p.reloading > 0 then taken = taken * game.mods.reload_guard end
-					-- Dodger: chance the bite misses entirely
-					if love.math.random() < game.mods.dodge then taken = 0 end
-					p.hp = p.hp - v.damage * game.damage_mul * taken
+					game.on_attacked(v.damage * game.damage_mul)
 					local snd = c.def and c.def.sounds and c.def.sounds.snd_attack_01
 					if snd and snd ~= "!NONE" then audio.play_sound(snd) end
 				end
-				if game.mods.touch_burn > 0 then
-					damage_creature(game, c, game.mods.touch_burn * dt)
+				-- Mr. Melee: "you don't just stand still. You hit back. Hard."
+				if game.mods.melee > 0 then
+					damage_creature(game, c, game.mods.melee * dt)
 				end
 			end
 		end
@@ -1020,10 +1291,10 @@ local function update_ebullets(game, dt)
 			local ddx, ddy = p.x - b.x, p.y - b.y
 			if ddx * ddx + ddy * ddy < 14 * 14 then
 				dead = true
-				if not game.effects.SHIELD
-					and love.math.random() >= game.mods.dodge then
-					p.hp = p.hp - b.damage * game.mods.taken
-					particles.blood(b.x, b.y, math.atan2(b.dy, b.dx))
+				if not game.effects.SHIELD then
+					if game.on_attacked(b.damage) then
+						particles.blood(b.x, b.y, math.atan2(b.dy, b.dx))
+					end
 				end
 			end
 		end
@@ -1103,8 +1374,11 @@ function game.update(dt)
 	end
 
 	-- level up -> pick a perk (gameplay pauses under the screen)
-	if game.xp >= game.xp_next then
-		game.xp = game.xp - game.xp_next
+	-- Perk Expert and Perk Master lower what a level costs, so they earn
+	-- themselves back in more perks
+	local needed = game.xp_next * game.mods.level_cost
+	if game.xp >= needed then
+		game.xp = game.xp - needed
 		game.level = game.level + 1
 		game.xp_next = math.floor(game.xp_next * 1.5)
 		print(("[game] level up! now level %d"):format(game.level))
@@ -1112,6 +1386,8 @@ function game.update(dt)
 		open_perk_screen(game)
 		return
 	end
+
+	update_perks(game, dt)
 
 	-- perk-driven regeneration
 	local mods = game.mods

@@ -36,7 +36,7 @@ function gallery.entry_at(kind, index)
 		data.load_all()
 		return data.weapon_order[index]
 	end
-	return perks.list[index]
+	return perks.get(index)
 end
 
 function gallery.slot_index(comp, prefix)
@@ -57,7 +57,7 @@ end
 --- Put every slot into one of three states:
 --   seen           its own art, and full details on hover
 --   undiscovered   the lock the plate ships with, and no details
---   unimplemented  dimmed (the original has 56 perks; perks.lua implements 25)
+--   unimplemented  dimmed, with the reason on its tooltip
 --
 -- Dimmed rather than hidden, because a hole in the original's grid would read
 -- as a bug — and distinct from the lock, because "you have not found this yet"
@@ -67,7 +67,12 @@ function gallery.fill(screen, prefix, kind)
 		local i = gallery.slot_index(comp, prefix)
 		if i then
 			local entry = gallery.entry_at(kind, i)
-			if not (entry and entry.icon) then
+			if entry and entry.unimplemented then
+				for _, s in ipairs({ "idle", "over", "pressed" }) do
+					comps.set(comp, "button.bitmap_color_" .. s, UNIMPLEMENTED)
+				end
+				comps.set(comp, "button.bm_icon", { entry.icon })
+			elseif not (entry and entry.icon) then
 				for _, s in ipairs({ "idle", "over", "pressed" }) do
 					comps.set(comp, "button.bitmap_color_" .. s, UNIMPLEMENTED)
 				end
@@ -91,7 +96,9 @@ local function draw_progress(screen, prefix, kind)
 	for _, comp in ipairs(screen.comps) do
 		local i = gallery.slot_index(comp, prefix)
 		local entry = i and gallery.entry_at(kind, i)
-		if entry and entry.icon then
+		-- what this port cannot serve is not part of the count: it can never
+		-- be discovered, so counting it would make 100% unreachable
+		if entry and entry.icon and not entry.unimplemented then
 			total = total + 1
 			if gallery.seen(kind, entry) then seen = seen + 1 end
 		end
@@ -188,9 +195,12 @@ function gallery.draw(screen_name, screen)
 
 	if not (entry and entry.icon) then
 		if kind == "perk" then
-			tooltip(screen, hover, "Not in this port yet",
-				"The original ships 56 perks; this port implements 25.", DIM)
+			tooltip(screen, hover, "Not in this port",
+				"This slot is empty in the original's own perk table.", DIM)
 		end
+	elseif entry.unimplemented then
+		tooltip(screen, hover, entry.name .. " (not in this port)",
+			entry.unimplemented, DIM)
 	elseif not gallery.seen(kind, entry) then
 		-- the name is the reward for finding it, so it stays hidden too
 		tooltip(screen, hover, "???", UNDISCOVERED[kind], DIM)

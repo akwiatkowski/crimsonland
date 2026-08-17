@@ -76,12 +76,20 @@ local RULES = {
 	BLITZ = score_at_least("blitz", 250000),
 	NUKEFISM = score_at_least("nukefism", 75000),
 
-	--- "Unlock all Perks" — against the roster this port implements.
+	--- "Unlock all Perks" — against the perks this port can actually hand out,
+	-- since one it cannot is one you could never take. perks.all() rather than
+	-- perks.list: the roster is built on first use, and an empty table would
+	-- award this to everybody.
 	PERKY = function()
-		for _, p in ipairs(require("mods.vanilla.game.perks").list) do
-			if not save.game.seen.perks[p.id] then return false end
+		local roster = require("mods.vanilla.game.perks").all()
+		local any = false
+		for _, p in pairs(roster) do
+			if p.apply and not p.unimplemented then
+				any = true
+				if not save.game.seen.perks[p.id] then return false end
+			end
 		end
-		return true
+		return any
 	end,
 
 	PACK_RAT = function() return save.game.stats.blowtorches >= 50 end,

@@ -96,15 +96,12 @@ function unlocks.saw_weapon(weapon)
 	end
 end
 
+--- A perk's id is the original's own index for it, which is also its grid slot
+-- and its icon number — so there is nothing to look up.
 function unlocks.saw_perk(perk)
 	if not perk then return end
-	for i, p in ipairs(require("mods.vanilla.game.perks").list) do
-		if p.id == perk.id then
-			if save.mark_seen("perks", perk.id) then
-				unlocks.show("PerkUnlocked", i)
-			end
-			return
-		end
+	if save.mark_seen("perks", perk.id) then
+		unlocks.show("PerkUnlocked", perk.index)
 	end
 end
 

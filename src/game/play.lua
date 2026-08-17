@@ -9,6 +9,7 @@ local bms = require("src.game.bms")
 local data = require("src.game.data")
 local fx = require("src.engine.fx")
 local hud = require("src.game.hud")
+local ai_player = require("src.game.ai_player")
 local input = require("src.game.input")
 local particles = require("src.game.particles")
 local perks = require("src.game.perks")
@@ -178,6 +179,9 @@ local function init_session(terrain_chapter)
 end
 
 function game.start_quest(chapter, quest, difficulty)
+	game.demo = false
+	input.set_controller(nil)
+	audio.sound_volume = 1
 	difficulty = difficulty or "NORMAL"
 	local diff_mul = DIFFICULTY[difficulty] or 1
 
@@ -223,7 +227,35 @@ local SURVIVAL_WAVES = {
 --- Start any endless mode ("survival" default; "blitz" is survival at
 -- 2.5x ramp speed; "rush", "waves", "nukefism", "weaponpicker" have their
 -- own rules). Mode rules are clean-room recreations of the originals.
+-- Attract mode: the original's timeline says the menu backdrop IS the game
+-- ("MainMenu" pushes GameCrimsonland with parm_demo="MENU_COMBAT_1..5"), so
+-- the menu sits over a session an AI is playing rather than over a still.
+function game.start_demo()
+	game.start_survival("survival")
+	game.demo = true
+	game.no_perks = true -- nothing may interrupt with a UI screen
+	game.spawn_interval = 1.2
+	game.max_concurrent = 10
+	game.chapter = love.math.random(1, NUM_CHAPTERS)
+	game.terrain = bake_terrain("CHAPTER_" .. game.chapter)
+	-- attract mode should look like someone playing well, and the starting
+	-- pistol caps out at 1.4 shots/s; each demo draws a different gun, which
+	-- is also what the original's five MENU_COMBAT setups were for
+	local w = data.weapon_order[love.math.random(2, 12)]
+	if w then
+		game.player.weapon = w
+		game.player.ammo = w.clip_size
+	end
+	input.set_controller(ai_player.controller())
+	-- gunfire belongs under the menu music, not over it
+	audio.sound_volume = 0.25
+	audio.switch_music("music/crimsonland", 0, 1)
+end
+
 function game.start_survival(mode)
+	game.demo = false
+	input.set_controller(nil)
+	audio.sound_volume = 1
 	game.mode = mode or "survival"
 	game.chapter = 1
 	game.quest = 0
@@ -934,14 +966,21 @@ function game.update(dt)
 
 	-- gameplay pauses whenever a UI screen overlays the game
 	-- (PickAPerk, LevelCompleted, ...); keep the perk preview live
+	-- the demo is the thing menus are drawn ON, so it keeps running under them
 	local screens = require("src.engine.screens")
 	local top = screens.top()
-	if top and top.name ~= "GameCrimsonland" then
+	if top and top.name ~= "GameCrimsonland" and not game.demo then
 		if top.name == "PickAPerk" then update_perk_hover(top) end
 		return
 	end
 
 	game.time = game.time + dt
+
+	-- the demo never ends: a dead AI just starts another fight
+	if game.demo and game.outcome then
+		game.start_demo()
+		return
+	end
 
 	if game.outcome then
 		game.end_timer = game.end_timer - dt
@@ -1091,8 +1130,9 @@ function game.camera()
 end
 
 function game.draw()
-	-- the crosshair replaces the OS cursor while a session runs
-	love.mouse.setVisible(not game.active)
+	-- the crosshair replaces the OS cursor while a session runs; the demo is
+	-- not being played by the person holding the mouse, so they keep theirs
+	love.mouse.setVisible(not game.active or game.demo)
 	if not game.active then
 		-- menu backdrop
 		love.graphics.setColor(0.05, 0.02, 0.03, 1)
@@ -1223,6 +1263,14 @@ function game.draw()
 
 	love.graphics.pop()
 
+	if game.demo then
+		-- menu panels have to stay readable over a firefight
+		love.graphics.setColor(0.03, 0.01, 0.02, 0.45)
+		love.graphics.rectangle("fill", 0, 0, SCREEN_W, SCREEN_H)
+		love.graphics.setColor(1, 1, 1, 1)
+		return -- no HUD: it is a backdrop, not a session the player owns
+	end
+
 	-- HUD (screen space): original 2014 art — health pie, crosshair with
 	-- reload sweep, XP strip, effect timers (src/game/hud.lua)
 	hud.draw(game)
@@ -1308,7 +1356,10 @@ end
 
 --- Screens the engine pushes carry no progress state of their own.
 function game.on_screen_enter(screen_name, screen)
-	if screen_name == "SelectChapter" then
+	if screen_name == "MainMenu" then
+		-- reaching the menu with nothing running means attract mode
+		if not game.active then game.start_demo() end
+	elseif screen_name == "SelectChapter" then
 		decorate_chapter_screen(screen)
 	elseif screen_name == "PlayMenuQuests" then
 		decorate_quest_screen(screen)
@@ -1436,9 +1487,12 @@ function game.on_ui_click(screen_name, comp_name)
 	return false
 end
 
---- Leave gameplay entirely and return to the menu timeline.
+--- Leave gameplay entirely and return to the menu timeline, which brings the
+-- attract-mode demo back up behind it.
 function game.to_main_menu()
 	game.active = false
+	game.demo = false
+	input.set_controller(nil)
 	require("src.engine.timeline").begin("MainMenu")
 end
 

@@ -1,7 +1,8 @@
 -- Persistence: profiles/statistics/settings (engine platform state) plus
 -- gameplay progress (completed quests, survival best) saved as a Lua table
--- in the port's own directory (src/engine/paths.lua: USER, which on macOS is
--- ~/Library/Application Support/Crimsonland, and a separate one under test).
+-- in the active mod's own directory (src/engine/paths.lua: USER, which on
+-- macOS is ~/Library/Application Support/Crimsonland/mods/<mod>, and a
+-- separate tree under test).
 --
 -- That directory is outside the LÖVE filesystem sandbox, so this is the one
 -- module in the port that reads and writes with plain `io`.
@@ -12,11 +13,19 @@ local paths = require("src.engine.paths")
 local save = {}
 
 local FILE = paths.USER .. "/save.lua"
--- Saves written before the move lived in LÖVE's save directory. Read once, as
--- a fallback; the next flush lands the same state in the new home and this
--- copy is never consulted again. LÖVE's save directory is not split per
--- environment the way paths.USER is, so a test run must not adopt it.
-local LEGACY_FILE = not paths.TESTING and "save.lua" or nil
+-- Older homes of this same file, newest first. Each is read once, as a
+-- fallback; the next flush lands the state in the current home and the old
+-- copy is never consulted again.
+--   APP/save.lua      before profiles were split per mod (engine/mod.lua)
+--   LÖVE save dir     before the file moved out of the LÖVE sandbox
+-- Both are the base game's profile, so they are only adopted when this module
+-- is running as vanilla: a mod that reuses it (mods/allweapons) shares the
+-- format, not the progress, and must start on an empty profile. LÖVE's save
+-- directory is not split per environment the way paths.APP is either, so a
+-- test run must not adopt that one at all.
+local IS_BASE = paths.USER == paths.APP .. "/mods/vanilla"
+local LEGACY_FILE = IS_BASE and (paths.APP .. "/save.lua") or nil
+local LEGACY_LOVE_FILE = (IS_BASE and not paths.TESTING) and "save.lua" or nil
 
 -- gameplay progress with defaults; load() replaces the contents in place
 save.game = {
@@ -72,15 +81,18 @@ end
 
 --- The save text and where it came from, or nil when this profile is new.
 local function read_save()
-	local f = io.open(FILE, "r")
-	if f then
-		local text = f:read("*a")
-		f:close()
-		return text, FILE
+	-- a nil LEGACY_FILE simply shortens the list (trailing nil, so #t == 1)
+	for _, path in ipairs({ FILE, LEGACY_FILE }) do
+		local f = io.open(path, "r")
+		if f then
+			local text = f:read("*a")
+			f:close()
+			return text, path
+		end
 	end
-	if LEGACY_FILE and love.filesystem.getInfo(LEGACY_FILE) then
-		return love.filesystem.read(LEGACY_FILE), love.filesystem.getSaveDirectory()
-			.. "/" .. LEGACY_FILE
+	if LEGACY_LOVE_FILE and love.filesystem.getInfo(LEGACY_LOVE_FILE) then
+		return love.filesystem.read(LEGACY_LOVE_FILE),
+			love.filesystem.getSaveDirectory() .. "/" .. LEGACY_LOVE_FILE
 	end
 end
 

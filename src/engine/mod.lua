@@ -12,6 +12,10 @@
 --     paths = { ASSETS=..., SFX=..., MUSIC=... },        -- optional overrides
 --   }
 --
+-- PROFILES: a mod's saved state is its own. `paths.USER` is set to
+-- APP/mods/<name> before the descriptor loads, so two mods never share a save
+-- file, an achievement set or a statistics page.
+--
 -- ORDERING: mod.select() must run before src.engine (or anything that
 -- requires src.engine.assets/screens) is loaded — engine modules capture
 -- their asset roots from src.engine.paths at require time, and a mod's
@@ -26,13 +30,21 @@ mod.current = nil -- the active mod descriptor
 
 function mod.select(name)
 	name = name or "vanilla"
+	-- Each cartridge writes to its own room: `paths.USER` becomes
+	-- APP/mods/<name>, so saves, achievements and statistics can never leak
+	-- from one mod into another's profile. This happens BEFORE the descriptor
+	-- is required, because a mod's save module reads paths.USER at require
+	-- time (mods/vanilla/game/save.lua does) — same ordering reason as the
+	-- asset roots below.
+	local paths = require("src.engine.paths")
+	paths.USER = paths.APP .. "/mods/" .. name
+
 	local def = require("mods." .. name)
 	assert(type(def) == "table", ("mod '%s' did not return a table"):format(name))
 	def.name = def.name or name
 	def.game = def.game or {}
 	def.save = def.save or {}
 	if def.paths then
-		local paths = require("src.engine.paths")
 		for k, v in pairs(def.paths) do paths[k] = v end
 	end
 	mod.current = def

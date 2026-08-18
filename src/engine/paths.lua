@@ -25,7 +25,14 @@ end
 -- An autotest run gets its own directory, so a scenario can never overwrite a
 -- real profile: the harness plays the game for real, and a scripted run that
 -- finishes a quest would otherwise mark it completed forever.
+--
+-- APP is the whole port's directory; USER is the active mod's room inside it,
+-- assigned by src/engine/mod.lua before the mod loads. A profile — progress,
+-- achievements, statistics, settings — belongs to one cartridge: a debug mod
+-- that hands out every weapon must not be able to mark a quest completed on
+-- the profile the base game reads. Nothing writes above USER.
 local APP_SUPPORT = love.filesystem.getUserDirectory() .. "Library/Application Support/"
+local APP = APP_SUPPORT .. (is_autotest() and "Crimsonland-Test" or "Crimsonland")
 
 return {
 	ASSETS = "vendor/assets", -- main data.pak contents
@@ -38,6 +45,9 @@ return {
 	PROG = "vendor/extracted/app/prog.dll",
 
 	-- absolute, outside the LÖVE filesystem sandbox — see the note above
-	USER = APP_SUPPORT .. (is_autotest() and "Crimsonland-Test" or "Crimsonland"),
+	APP = APP,
+	-- overwritten with APP/mods/<mod> by mod.select(); the plain APP value is
+	-- only what anything loaded before a mod is chosen would see
+	USER = APP,
 	TESTING = is_autotest(),
 }

@@ -32,6 +32,21 @@ local function conventional_path(name)
 	return "ui/" .. dash .. ".lua"
 end
 
+--- A screen with no pak layout behind it, built from real comps by `builder`.
+--
+-- The engine's own GamePause is made this way (src/engine/init.lua): the comps
+-- are the same ones a layout would have created, so hit-testing, hover sounds,
+-- transitions and click routing all behave like any other screen — which is
+-- what a hand-drawn overlay never gets. A mod needing a screen the original
+-- never had (a shop, a build menu) registers it here rather than shipping a
+-- layout file, because the pak is read-only and gitignored.
+--
+-- `builder(screen)` runs once per push, at load time: create the comps and set
+-- screen.env.OnClick / OnKeyDown / OnDraw.
+function screens.register_internal(name, builder)
+	screens.registry[name] = { internal = builder }
+end
+
 -- C++-side screens (layout paths embedded in prog.dll) + autoexec ones.
 function screens.register_builtin(name)
 	local layout = conventional_path(name)

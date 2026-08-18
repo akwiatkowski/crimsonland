@@ -557,7 +557,14 @@ local function register_internal_screens()
 			screen.env.OnUpdate = function(dt) mod.game_call("update", dt) end
 			screen.env.OnKeyDown = function(key)
 				-- the mod's pause() guards against inactive/ended sessions
-				if key == "ESCAPE" then mod.game_call("pause") end
+				if key == "ESCAPE" then
+					mod.game_call("pause")
+				else
+					-- everything else is the game's: a key pressed while the
+					-- field has the screen is gameplay, and only the mod knows
+					-- what it means (tower defence opens its HQ with one)
+					mod.game_call("keypressed", key)
+				end
 			end
 			screen.env.OnDraw = function() end
 		end,

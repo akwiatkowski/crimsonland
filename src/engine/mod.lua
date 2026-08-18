@@ -38,6 +38,10 @@ function mod.select(name)
 	-- asset roots below.
 	local paths = require("src.engine.paths")
 	paths.USER = paths.APP .. "/mods/" .. name
+	-- ...and where its own art lives, searched before the pak by
+	-- assets.resolve: `mods/<name>/assets/` mirrors the vendor tree, with an
+	-- optional `assets-1080p/` beside it for hi-res twins.
+	paths.MOD = "mods/" .. name
 
 	local def = require("mods." .. name)
 	assert(type(def) == "table", ("mod '%s' did not return a table"):format(name))

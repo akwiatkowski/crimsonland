@@ -50,6 +50,22 @@ end
 -- part of the tree — no terrains/, fxs/, gems/ — so callers always get the base
 -- file as fallback. Returns nil when neither set has the file.
 function assets.resolve(path)
+	-- The active mod's own art comes first, because a mod that ships a file is
+	-- saying what that name means for this cartridge — whether it is replacing
+	-- something the pak has (a turret plate over a UI panel) or naming
+	-- something the pak never had. Its 1x file beats the pak's 1080p twin on
+	-- purpose: that twin is the *original's* art at higher density, not a
+	-- denser version of the mod's, and silently preferring it would show the
+	-- thing the mod replaced.
+	local mod = paths.MOD
+	if mod then
+		if assets.hires then
+			local hi = mod .. "/assets-1080p/" .. path
+			if love.filesystem.getInfo(hi) then return hi, HIRES_SCALE end
+		end
+		local own = mod .. "/assets/" .. path
+		if love.filesystem.getInfo(own) then return own, 1 end
+	end
 	if assets.hires then
 		local hi = ROOT_1080P .. "/" .. path
 		if love.filesystem.getInfo(hi) then return hi, HIRES_SCALE end

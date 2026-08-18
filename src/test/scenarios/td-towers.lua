@@ -46,6 +46,8 @@ end
 
 return {
 	{ t = 2.5, click = "PlayMenu" },
+	-- the mod has its own front door now: Play opens it, this starts the run
+	{ t = 3.5, click = "NewRun" },
 	{ t = 3.0, run = take_over },
 
 	-- three waves of income first: a mount plus a weapon is more than the

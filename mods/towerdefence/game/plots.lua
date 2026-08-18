@@ -161,12 +161,21 @@ end
 
 local BRASS = { 0.85, 0.68, 0.28 }
 
---- The mount, drawn as a plate wearing the weapon's own gallery icon.
+-- The plate a mount stands on. This mod's own art, resolved through the mod
+-- asset overlay (src/engine/assets.lua looks in mods/<name>/assets/ before the
+-- pak), which is what the overlay was built for: the pak ships no buildings,
+-- because the original had none.
 --
--- The pak has no turret art in it and this mod owns no art of its own yet, so
--- the honest thing is also the readable one: the icon that means "Plasma
--- Cannon" everywhere else in the game means it here too, and a glance at the
--- perimeter says what is holding which side.
+-- It is a deliberate placeholder — a dark metal disc with a brass rim and four
+-- bolts, drawn programmatically rather than by hand, matching the bone/brass
+-- palette the HUD and the drop plates already use. Good enough to read as a
+-- gun emplacement at a glance; replace it with real art without touching a
+-- line of code.
+local PLATE = "td/mount-plate.png"
+
+--- The mount: the plate, wearing the weapon's own gallery icon. The icon is
+-- the pak's, and it means the same thing here as everywhere else in the game,
+-- so a glance at the perimeter says what is holding which side.
 local function draw_mount(plot, near)
 	local x, y = plot.x, plot.y
 
@@ -179,12 +188,26 @@ local function draw_mount(plot, near)
 		return
 	end
 
-	-- the plate
-	love.graphics.setColor(0.10, 0.10, 0.11, 0.9)
-	love.graphics.circle("fill", x, y, 30)
-	love.graphics.setColor(BRASS[1], BRASS[2], BRASS[3], plot.tier >= 2 and 1 or 0.6)
-	love.graphics.circle("line", x, y, 30)
-	if plot.tier >= 2 then love.graphics.circle("line", x, y, 26) end
+	-- the plate. A reinforced mount wears the same plate at full brightness;
+	-- a light one is dimmed, so the tier is visible from across the field
+	-- without a second sprite.
+	local plate = assets.image(PLATE)
+	if plate then
+		local s = 64 / plate:getWidth()
+		local k = plot.tier >= 2 and 1 or 0.75
+		love.graphics.setColor(k, k, k, 1)
+		love.graphics.draw(plate, x, y, 0, s, s,
+			plate:getWidth() / 2, plate:getHeight() / 2)
+	else
+		love.graphics.setColor(0.10, 0.10, 0.11, 0.9)
+		love.graphics.circle("fill", x, y, 30)
+		love.graphics.setColor(BRASS[1], BRASS[2], BRASS[3], plot.tier >= 2 and 1 or 0.6)
+		love.graphics.circle("line", x, y, 30)
+	end
+	if plot.tier >= 2 then
+		love.graphics.setColor(BRASS[1], BRASS[2], BRASS[3], 0.9)
+		love.graphics.circle("line", x, y, 34)
+	end
 
 	if plot.weapon then
 		-- the barrel: a line towards whatever it is tracking, which is what

@@ -35,6 +35,8 @@ end
 
 return {
 	{ t = 2.5, click = "PlayMenu" },
+	-- the mod has its own front door now: Play opens it, this starts the run
+	{ t = 3.5, click = "NewRun" },
 	{ t = 4.0, run = stand_down },
 	{ t = 6.0, run = report("loaded") }, -- what a previous run left behind
 	{ t = 90.0, run = report("losing") },

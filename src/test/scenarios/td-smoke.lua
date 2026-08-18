@@ -33,8 +33,10 @@ end
 -- the base must start bleeding. A run where wave 1 already hurts, or where
 -- wave 6 does not, means the ramp moved.
 return {
-	{ t = 2.5, click = "PlayMenu" }, -- starts the run
-	{ t = 3.0, run = take_over },
+	{ t = 2.5, click = "PlayMenu" },
+	-- the mod has its own front door now: Play opens it, this starts the run
+	{ t = 3.5, click = "NewRun" }, -- starts the run
+	{ t = 4.0, run = take_over },
 	{ t = 6.0, run = report }, -- the opening lull
 	{ t = 30.0, run = report }, -- wave 1
 	{ t = 60.0, run = report }, -- wave 2

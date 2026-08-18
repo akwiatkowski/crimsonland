@@ -50,6 +50,8 @@ end
 
 return {
 	{ t = 2.5, click = "PlayMenu" },
+	-- the mod has its own front door now: Play opens it, this starts the run
+	{ t = 3.5, click = "NewRun" },
 
 	-- RULE 2, checked first: during the opening lull nothing is on the field,
 	-- so the player is certainly alive and standing where they were put. The

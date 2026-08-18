@@ -41,6 +41,10 @@ local SUPPORTED = {
 	kill_heal = true, -- kill_creature
 	creature_hp = true, creature_speed = true, -- add_creature, update_creatures
 	score_mul = true, -- pay_for: in this mod, score is money
+	dodge = true, -- hurt_player
+	poison = true, -- update_bullets sets it, update_creatures ticks it
+	melee = true, -- update_creatures, against whatever is biting you
+	aura_dmg = true, aura_radius = true, -- update_aura
 }
 
 -- Fields a perk may move without the card lying, because this mod has no such

@@ -33,6 +33,7 @@ local cards = require("mods.towerdefence.game.cards")
 local hq = require("mods.towerdefence.game.hq")
 local plots = require("mods.towerdefence.game.plots")
 local hud = require("mods.towerdefence.game.hud")
+local menu = require("mods.towerdefence.game.menu")
 local prices = require("mods.towerdefence.game.prices")
 local shooter = require("mods.towerdefence.game.shooter")
 local waves = require("mods.towerdefence.game.waves")
@@ -78,6 +79,17 @@ local MAX_CREATURES = 90
 
 local HIT_FLASH = 0.08
 local RESPAWN_TIME = 6 -- seconds you are off the field after dying
+
+-- Salvage: a share of what a kill was worth, left on the ground where it died
+-- instead of appearing in the till. Pure upside — the immediate payment is
+-- unchanged, so the economy model still holds — but collecting it means
+-- walking away from the base, which is the only thing in this mod that pays
+-- you for taking ground rather than holding it. It rots, so it is a decision
+-- with a clock on it rather than an errand to run later.
+local SALVAGE_CHANCE = 0.35
+local SALVAGE_SHARE = 0.5 -- of what the kill already paid
+local SALVAGE_LIFE = 20 -- seconds before it is gone
+local SALVAGE_REACH = 26
 
 local START_MONEY = 250
 local START_WEAPON = "ASSAULT_RIFLE"
@@ -133,6 +145,7 @@ function field.start_run()
 	field.owned_perks = {}
 	field.cards_taken = 0
 	field.card_offer = nil
+	field.drops = {} -- salvage lying on the field; also what vanilla's AI reads
 	field.plots = plots.create(BASE_X, BASE_Y)
 	field.near_hq = false
 	field.near_plot = nil
@@ -229,7 +242,18 @@ local function pay_for(c)
 	local pay = math.floor(c.variant.xp / KILL_PAY_DIVISOR)
 	pay = math.max(1, math.min(KILL_PAY_MAX, pay))
 	-- the original's "more points" perks pay in the only currency this mod has
-	field.money = field.money + math.floor(pay * field.mods.score_mul)
+	pay = math.floor(pay * field.mods.score_mul)
+	field.money = field.money + pay
+	return pay
+end
+
+--- Leave something on the ground worth going out for.
+local function drop_salvage(c, paid)
+	if love.math.random() > SALVAGE_CHANCE then return end
+	local value = math.max(1, math.floor(paid * SALVAGE_SHARE))
+	field.drops[#field.drops + 1] = {
+		x = c.x, y = c.y, value = value, t = 0, kind = "salvage",
+	}
 end
 
 local function kill_creature(c, overkill)
@@ -240,7 +264,7 @@ local function kill_creature(c, overkill)
 	particles.death_burst(c.x, c.y, c.scale)
 	gibs.spawn(c, overkill and 2.5 or 1)
 	field.kills = field.kills + 1
-	pay_for(c)
+	drop_salvage(c, pay_for(c))
 	if field.mods.kill_heal > 0 and not field.player.dead_t then
 		field.player.hp = math.min(field.player.max_hp,
 			field.player.hp + field.mods.kill_heal)
@@ -484,6 +508,8 @@ end
 local function hurt_player(dmg)
 	local p = field.player
 	if p.dead_t then return end
+	-- Dodger: the hit that simply does not land
+	if love.math.random() < field.mods.dodge then return end
 	-- Thick Skinned and its family: what actually lands on you
 	p.hp = p.hp - dmg * field.mods.taken
 	if p.hp <= 0 then
@@ -542,6 +568,9 @@ local function update_bullets(dt)
 					if ddx * ddx + ddy * ddy < r * r then
 						local dir = math.atan2(b.dy, b.dx)
 						local power = particles.power(b.damage)
+						-- Poison Bullets: what the round leaves behind in it,
+						-- refreshed by every further hit
+						if field.mods.poison > 0 then c.poison_t = 4 end
 						particles.impact(b.art or "bullet", b.weapon_id,
 							b.x, b.y, dir, power)
 						if damage_creature(c, b.damage) then
@@ -638,6 +667,11 @@ local function update_creatures(dt)
 		else
 			c.anim_t = c.anim_t + dt
 			c.attack_cd = math.max(0, c.attack_cd - dt)
+			if c.poison_t then
+				c.poison_t = c.poison_t - dt
+				damage_creature(c, field.mods.poison * dt)
+				if c.poison_t <= 0 then c.poison_t = nil end
+			end
 
 			local v = c.variant
 			local tx, ty, what = target_of(c)
@@ -704,6 +738,50 @@ local function update_creatures(dt)
 				else
 					hurt_player(v.damage * w.damage_mul)
 				end
+			end
+			-- Mr. Melee: whatever is close enough to bite you is close enough
+			-- to be hit back, whether or not its own attack came round yet
+			if what == "player" and field.mods.melee > 0 and dist < reach then
+				damage_creature(c, field.mods.melee * dt)
+			end
+		end
+	end
+end
+
+--- Salvage ages where it fell, and is taken by walking over it.
+local function update_drops(dt)
+	local p = field.player
+	for i = #field.drops, 1, -1 do
+		local d = field.drops[i]
+		d.t = d.t + dt
+		local gone = d.t >= SALVAGE_LIFE
+		if not gone and not p.dead_t then
+			local dx, dy = p.x - d.x, p.y - d.y
+			if dx * dx + dy * dy < SALVAGE_REACH * SALVAGE_REACH then
+				field.money = field.money + d.value
+				audio.play_sound("sfx/ui_bonus") -- the pak's own "you got something"
+				particles.sparkle(d.x, d.y)
+				gone = true
+			end
+		end
+		if gone then table.remove(field.drops, i) end
+	end
+end
+
+--- Radioactive and its greater form: everything close enough to the player
+-- loses health for being there. No projectile, no aiming, and it is the only
+-- damage in the mod that a mount can never do for you -- which is the point of
+-- it as a *player* perk.
+local function update_aura(dt)
+	local m = field.mods
+	if m.aura_dmg <= 0 or m.aura_radius <= 0 or field.player.dead_t then return end
+	local p, r = field.player, m.aura_radius
+	for i = #field.creatures, 1, -1 do
+		local c = field.creatures[i]
+		if not c.dying then
+			local dx, dy = c.x - p.x, c.y - p.y
+			if dx * dx + dy * dy < r * r then
+				damage_creature(c, m.aura_dmg * dt)
 			end
 		end
 	end
@@ -776,6 +854,8 @@ function field.update(dt)
 
 	if not field.over then
 		update_player(dt)
+		update_aura(dt)
+		update_drops(dt)
 		plots.update(field, dt) -- the mounts fight whether you are there or not
 		update_waves(dt)
 		update_creatures(dt)
@@ -797,16 +877,29 @@ function field.camera()
 	return cx, cy
 end
 
--- Placeholder base art: the pak has no buildings in it, and mod-owned assets
--- are not built yet (plans/crimsonland.md). Rings rather than a sprite, in the
--- HUD's own bone/brass palette so it does not read as a bug.
+-- The base, on this mod's own art (mods/towerdefence/assets/, found ahead of
+-- the pak by assets.resolve). Like the mount plate it is a generated
+-- placeholder in the HUD's bone/brass palette -- an armoured apron with
+-- buttresses on the eight plot bearings -- and like the mount plate it can be
+-- replaced by real art without touching code. Drawn as rings before, which
+-- read as a hole in the ground in every screenshot.
+local BASE_PLATE = "td/base-plate.png"
+
 local function draw_base()
 	local b = field.base
 	local k = b.hp / b.max_hp
-	love.graphics.setColor(0.10, 0.10, 0.11, 0.85)
-	love.graphics.circle("fill", b.x, b.y, BASE_RADIUS)
-	love.graphics.setColor(0.85, 0.68, 0.28, 0.9)
-	love.graphics.circle("line", b.x, b.y, BASE_RADIUS)
+	local plate = assets.image(BASE_PLATE)
+	if plate then
+		local s = (BASE_RADIUS * 2) / plate:getWidth()
+		love.graphics.setColor(1, 1, 1, 1)
+		love.graphics.draw(plate, b.x, b.y, 0, s, s,
+			plate:getWidth() / 2, plate:getHeight() / 2)
+	else
+		love.graphics.setColor(0.10, 0.10, 0.11, 0.85)
+		love.graphics.circle("fill", b.x, b.y, BASE_RADIUS)
+		love.graphics.setColor(0.85, 0.68, 0.28, 0.9)
+		love.graphics.circle("line", b.x, b.y, BASE_RADIUS)
+	end
 	love.graphics.setColor(0.85, 0.68, 0.28, 0.25 + 0.35 * k)
 	love.graphics.circle("fill", b.x, b.y, BASE_RADIUS * 0.45 * (0.6 + 0.4 * k))
 	-- the perimeter the wave has to cross to touch it
@@ -940,6 +1033,19 @@ function field.draw()
 		end
 	end
 
+	-- salvage, pulsing so it reads as something to go and get, and fading in
+	-- its last seconds so the clock on it is visible rather than remembered
+	for _, d in ipairs(field.drops) do
+		local left = 1 - d.t / SALVAGE_LIFE
+		local a = (left < 0.25) and (left / 0.25) or 1
+		local pulse = 1 + math.sin(field.time * 6 + d.x) * 0.15
+		love.graphics.setColor(0.85, 0.68, 0.28, 0.85 * a)
+		love.graphics.circle("fill", d.x, d.y, 6 * pulse)
+		love.graphics.setColor(1, 0.95, 0.8, 0.9 * a)
+		love.graphics.circle("line", d.x, d.y, 9 * pulse)
+	end
+	love.graphics.setColor(1, 1, 1, 1)
+
 	draw_bullets()
 	fx.draw("world")
 	love.graphics.pop()
@@ -985,14 +1091,14 @@ function field.keypressed(key)
 	end
 end
 
---- There is still no menu of this mod's own: Play on the pak's main menu
--- starts a run, and a click on the field once the base is gone goes back to
--- it. The HQ screens, though, are real now — anything they own is theirs.
+--- Play on the pak's main menu opens this mod's own front door rather than
+-- starting a run outright; everything else here belongs to a screen that owns
+-- it. A click on the field once the base is gone goes back to the menu.
 function field.on_ui_click(screen_name, comp_name)
 	if hq.on_ui_click(screen_name, comp_name, field) then return true end
+	if menu.on_ui_click(screen_name, comp_name, field) then return true end
 	if screen_name == "MainMenu" and comp_name == "PlayMenu" then
-		field.start_run()
-		require("src.engine.timeline").begin("Game")
+		menu.open(field)
 		return true
 	end
 	if screen_name == "GameCrimsonland" and field.over then
@@ -1008,6 +1114,7 @@ end
 
 function field.on_screen_draw(screen_name, screen)
 	hq.on_screen_draw(screen_name, screen)
+	menu.on_screen_draw(screen_name, screen)
 end
 
 return field

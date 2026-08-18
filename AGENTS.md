@@ -107,13 +107,34 @@ NX_SetCursor NX_GetInterface NX_GetTime NX_FileExists NX_Popup NX_CallExtension`
   `src/engine/mod.lua` — a mod descriptor (`mods/<name>/init.lua`) provides
   `game` hooks (update/draw/pause/unpause/to_main_menu/on_ui_click), `save`
   (load/flush), and optional `paths` overrides for total conversions.
-- Selected with `--mod=<name>` (`make run MOD=<name>`), default `vanilla`.
+- Selected with `--mod=<name>` (`make run MOD=<name>`, `make test MOD=<name>`),
+  default `vanilla`.
 - `mods/vanilla/` is the clean-room Crimsonland, implementation and all
   (`mods/vanilla/game/`). Nothing under `src/` requires it: the engine and the
   test harness reach the game only through the descriptor.
 - ORDERING: `mod.select()` runs before `src.engine` loads, because engine
   modules capture asset roots from `src.engine.paths` at require time and
   path overrides mutate that table in place.
+- PROFILES: one mod, one profile. `paths.APP` is the port's directory
+  (`~/Library/Application Support/Crimsonland`, `-Test` under `--autotest`)
+  and `mod.select` sets `paths.USER = APP/mods/<name>` **before requiring the
+  descriptor** — vanilla's `save.lua` reads `paths.USER` at require time, so
+  doing it after would put every mod back in one save file. Saves,
+  achievements, statistics and settings all live in that one file, so this
+  split covers all of them; vanilla adopts a pre-split `APP/save.lua` once
+  (and only vanilla does — see `IS_BASE` there).
+- LAYERING: a mod can be a thin layer over another instead of a fork —
+  `mods/allweapons/` is vanilla's `game` table behind a metatable with three
+  hooks wrapped (`mods/allweapons/picker.lua`). Rules that live in vanilla's
+  own modules (quest gating in `save.lua`) are changed by replacing those
+  functions; that is only sound because the layer owns its own profile.
+- `mods/allweapons/` — the debug cartridge, two rules removed: nothing is
+  locked, and any click that would start a run is held while the Extras weapon
+  gallery is pushed as a picker, then replayed once a plate is chosen (so the
+  layer never has to know what a chapter, difficulty or endless mode is —
+  vanilla starts the run from its own menu state and only the weapon is put in
+  the player's hands afterwards). Drops, ammo and damage stay vanilla on
+  purpose: a weapon must behave here as it behaves in the game.
 
 ## Gameplay layer (mods/vanilla/game/)
 
@@ -160,11 +181,12 @@ NX_SetCursor NX_GetInterface NX_GetTime NX_FileExists NX_Popup NX_CallExtension`
   agree), the flash, heat-haze sources, and blood decals stamped into the
   terrain canvas. Deliberately NO hit-stop: twenty things die a second here
 - `save.lua` — platform state + progress to `~/Library/Application Support/
-  Crimsonland/save.lua` (`paths.USER`; `Crimsonland-Test` under `--autotest`,
-  so a scripted run cannot complete a quest on a real profile). That is outside
-  the LÖVE sandbox, so this one module uses plain `io` and `os.execute mkdir`;
-  a save left in the old LÖVE save dir is read once and migrated. Sandboxed
-  load (`setfenv`), flushed on quit/outcomes
+  Crimsonland/mods/vanilla/save.lua` (`paths.USER`, per mod; `Crimsonland-Test`
+  under `--autotest`, so a scripted run cannot complete a quest on a real
+  profile). That is outside the LÖVE sandbox, so this one module uses plain
+  `io` and `os.execute mkdir`; saves left in either older home (pre-mod-split
+  `APP/save.lua`, or the LÖVE save dir before that) are read once and migrated.
+  Sandboxed load (`setfenv`), flushed on quit/outcomes
 - Quest kill-count/spawn tables are approximations — original quest defs were
   compiled into prog.dll; only `custom-quests/` ships as XML
 
@@ -185,7 +207,8 @@ NX_SetCursor NX_GetInterface NX_GetTime NX_FileExists NX_Popup NX_CallExtension`
 
 ## Test harness (src/test/)
 
-- Loaded ONLY via `love . --autotest[=scenario]` (`make test SCENARIO=...`);
+- Loaded ONLY via `love . --autotest[=scenario]` (`make test SCENARIO=... [MOD=...]`,
+  and a scenario written for a mod needs that mod: `allweapons-smoke`);
   `make run` never touches test code — main.lua's arg check is the sole gate
 - `harness.lua` drives the game like a player (synthesized screens.mousepressed/
   keypressed, read-only state captures) — do not mutate game internals from it

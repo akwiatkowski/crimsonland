@@ -2,7 +2,8 @@
 #
 # `make run`      — launch the game with LÖVE (interactive play)
 # `make test`     — autotest: scripted input + ASCII captures to the terminal
-#                   (SCENARIO=<name> picks a src/test/scenarios/ file)
+#                   (SCENARIO=<name> picks a src/test/scenarios/ file;
+#                    MOD=<name> picks the cartridge, as with `make run`)
 # `make extract`  — rebuild vendor/ from the original GOG rar
 # `make clean`    — remove extracted vendor data (keeps the rar)
 
@@ -26,7 +27,7 @@ run: check-love
 SCENARIO ?= quest-smoke
 
 test: check-love
-	$(LOVE) . --autotest=$(SCENARIO)
+	$(LOVE) . --mod=$(MOD) --autotest=$(SCENARIO)
 
 check-love:
 	@test -x "$(LOVE)" || { \

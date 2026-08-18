@@ -110,6 +110,12 @@ Done:
       Shock Chain, Fire Spinner — plus the announcement banner the pak ships
       the plate for, and brass only from the guns that have a case to eject
 
+- [x] A second cartridge, `mods/allweapons/` — every chapter open and a weapon
+      chosen off the gallery grid before each run, for testing a weapon in any
+      map in seconds. It is a thin layer over `mods/vanilla/`, and the engine
+      now gives every mod its own profile directory, so nothing it clears can
+      touch the base game's progress or achievements
+
 Next:
 
 - [ ] Gamepad support (`joystick` is enabled but unused)
@@ -127,11 +133,18 @@ make test      # scripted autotest (SCENARIO=quest-smoke): ASCII captures to
                # the terminal plus PNG frames in LÖVE's save directory
 ```
 
+Both take `MOD=<name>` to pick a cartridge from `mods/` (default `vanilla`):
+`make run MOD=allweapons` opens every chapter and asks which weapon to start
+with. Each mod keeps its own profile — progress, achievements, statistics and
+settings — under `~/Library/Application Support/Crimsonland/mods/<name>/`, so
+playing a debug cartridge cannot unlock anything in the base game.
+
 Scenarios: `quest-smoke`, `quest-fast`, `quest-win` (an AI plays chapter 1
 quest 1 to the end, for the completed panel), `combat-smoke` (an AI plays, so
 weapons/hits/drops are exercised), `survival-smoke`, `rush-smoke`,
 `menus-smoke` (galleries + statistics), `options-smoke`, `fx-smoke`,
-`emitter-smoke`, `editbox-smoke`, `perks-smoke`, `custom-smoke`.
+`emitter-smoke`, `editbox-smoke`, `perks-smoke`, `custom-smoke`,
+`allweapons-smoke` (needs `MOD=allweapons`).
 
 Scenarios run on a fixed 1/60 clock as fast as the machine manages, not on
 real time — a minimized LÖVE window is App-Nap throttled on macOS, which used
@@ -154,6 +167,7 @@ Escape aborts the quest back to the menu.
 | `main.lua`, `conf.lua`  | LÖVE entry point (game only)                       |
 | `src/engine/`           | Reimplemented 10tons engine runtime (screens, comps, NX_* API) |
 | `mods/vanilla/`         | The game as a mod: descriptor, `game/` (quests, creatures, weapons, UI screens) and `fxs/` (the port's own particle effects) |
+| `mods/allweapons/`      | Debug cartridge: everything unlocked, weapon picked before each run |
 | `src/test/`             | Autotest harness + scripted scenarios (loaded only with `--autotest`) |
 | `tools/`                | `extract_pak.py` — PAK V11 extractor               |
 | `vendor/`               | Original rar, installer, `extracted/`, `assets*/` (gitignored) |

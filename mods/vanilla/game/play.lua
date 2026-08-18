@@ -118,6 +118,12 @@ local EMPTY_FIRE_HP = 2
 -- How close an infected creature has to be to pass Plaguebearer's disease on.
 local PLAGUE_SPREAD = 70
 
+-- How long the gun you just swapped out stays on the ground, and how long it
+-- takes to settle before it can be picked back up. Long enough to change your
+-- mind, short enough that the field does not fill with old guns.
+local DROPPED_WEAPON_LIFE = 8
+local DROPPED_WEAPON_ARM = 0.6
+
 local DROP_WEAPON_CHANCE = 0.08
 local DROP_HEALTH_CHANCE = 0.06
 local DROP_POWERUP_CHANCE = 0.05
@@ -517,6 +523,9 @@ local function add_creature(game, variant, x, y, is_boss)
 		-- Bad Blood leaves them with less health to spend
 		hp = variant.health * game.health_mul * game.mods.creature_hp
 			* (is_boss and quests.BOSS_HP_MUL or 1),
+		-- its own copy: Shrinkifier rounds scale a creature down, and the
+		-- variant table is shared by every creature of that variant
+		scale = variant.scale,
 		anim_t = love.math.random() * 2,
 		attack_cd = 0,
 		is_boss = is_boss or nil,
@@ -894,6 +903,8 @@ local function update_player(game, dt)
 					-- from any other kinetic one
 					art = w.proj_art,
 					weapon_id = w.id,
+					-- what this round *does*: see game/traits.lua
+					traits = w.traits,
 				}
 			end
 		end
@@ -1040,20 +1051,20 @@ function damage_creature(game, c, dmg)
 		-- freeze facing so the gore anim + baked corpse keep it
 		c.rot = c.fixed_rot
 			or math.atan2(game.player.y - c.y, game.player.x - c.x)
-		particles.death_burst(c.x, c.y, c.variant.scale)
+		particles.death_burst(c.x, c.y, c.scale)
 		-- what it emptied onto the ground, under where it came apart
 		for _ = 1, 3 do
 			game.blood_decal(
-				c.x + (love.math.random() - 0.5) * 26 * c.variant.scale,
-				c.y + (love.math.random() - 0.5) * 26 * c.variant.scale,
-				(0.7 + love.math.random() * 0.7) * c.variant.scale,
+				c.x + (love.math.random() - 0.5) * 26 * c.scale,
+				c.y + (love.math.random() - 0.5) * 26 * c.scale,
+				(0.7 + love.math.random() * 0.7) * c.scale,
 				0.35 + love.math.random() * 0.3)
 		end
 		-- the parts creatures.xml says this creature is made of
 		gibs.spawn(c, c.overkill and 2.5 or 1)
 		-- something killed while encased sheds its ice with the rest of it
 		if game.effects.FREEZE then
-			particles.ice_shatter(c.x, c.y, c.variant.scale)
+			particles.ice_shatter(c.x, c.y, c.scale)
 		end
 		game.kills = game.kills + 1
 		-- Home Wrecker counts nests: a den is a creature that hatches others
@@ -1204,6 +1215,19 @@ end
 -- What colour a blast burns. The fireball art is painted for ordnance, so a
 -- rocket takes it as it is; the energy weapons tint it towards their own bolt
 -- rather than asking for a second sheet of hand-painted fire.
+-- What a weapon family looks like, on its ground drop's plate. Same colours
+-- the blasts and impact sparks use, so a family reads the same whether it is
+-- being fired, exploding, or lying in the grass.
+local FAMILY_TINT = {
+	bullet = { 0.85, 0.8, 0.6 },
+	rocket = { 1.0, 0.6, 0.35 },
+	flame = { 1.0, 0.55, 0.2 },
+	plasma = { 0.55, 0.8, 1.0 },
+	ion = { 0.6, 1.0, 0.65 },
+	pulse = { 1.0, 0.9, 0.5 },
+	blade = { 0.8, 0.85, 0.9 },
+}
+
 local BLAST_TINT = {
 	plasma = { 0.55, 0.8, 1.0 },
 	ion = { 0.6, 1.0, 0.65 },
@@ -1245,6 +1269,9 @@ local MARK = {
 }
 
 local DECAL_HIT_CHANCE = 0.35
+-- A round that hit nothing marks the ground this often. Low: misses vastly
+-- outnumber hits with an automatic weapon.
+local MISS_MARK_CHANCE = 0.14
 -- A wave dying at once is a lot of stamps; past this they are dropped rather
 -- than queued, because the ground is already red by then.
 local DECAL_MAX_QUEUED = 64
@@ -1349,7 +1376,7 @@ local function explode(game, x, y, base_damage, art)
 	for _, c in ipairs(game.creatures) do
 		local ddx, ddy = c.x - x, c.y - y
 		local dist = math.sqrt(ddx * ddx + ddy * ddy)
-		local reach = radius + 16 * c.variant.scale
+		local reach = radius + 16 * c.scale
 		if dist < reach then
 			local falloff = 1 - 0.7 * (dist / reach)
 			damage_creature(game, c, base_damage * 2 * falloff)
@@ -1489,7 +1516,7 @@ local function update_perks(game, dt)
 			game.jinx_t = game.jinx_t - 1
 			local c = game.creatures[love.math.random(1, #game.creatures)]
 			if c and not c.dying then
-				particles.death_burst(c.x, c.y, c.variant.scale)
+				particles.death_burst(c.x, c.y, c.scale)
 				damage_creature(game, c, 1e6)
 			end
 		end
@@ -1534,6 +1561,136 @@ local function update_perks(game, dt)
 	end
 end
 
+-- ------------------------------------------------------------------ traits
+--
+-- The verbs a projectile can have (game/traits.lua). Each is a small change to
+-- what a straight line already does, and weapons are recombinations of them --
+-- which is the alternative to giving 38 weapons one decision between them
+-- ("is the number bigger?").
+
+--- Nearest living creature to a point, optionally within a range and skipping
+-- ones already dealt with. Used by homing and by chaining.
+local function nearest_creature(game, x, y, range, skip)
+	local best, bestd
+	for _, c in ipairs(game.creatures) do
+		if not c.dying and not (skip and skip[c]) then
+			local dx, dy = c.x - x, c.y - y
+			local d = dx * dx + dy * dy
+			if (not range or d < range * range) and (not bestd or d < bestd) then
+				best, bestd = c, d
+			end
+		end
+	end
+	return best
+end
+
+-- How far a homing round looks for something to steer at. Beyond this it flies
+-- straight, so a seeker fired at nothing does not curl around the field.
+local HOMING_SIGHT = 420
+
+--- Steer a round toward the nearest creature at its own turn rate. A rate
+-- rather than a snap: a missile that turns instantly makes dodging pointless,
+-- and the point of a seeker is that it corrects, not that it cannot be beaten.
+local function steer_homing(game, b, dt)
+	local target = nearest_creature(game, b.x, b.y, HOMING_SIGHT)
+	if not target then return end
+	local want = math.atan2(target.y - b.y, target.x - b.x)
+	local cur = math.atan2(b.dy, b.dx)
+	-- shortest way round the circle
+	local diff = ((want - cur + math.pi) % (2 * math.pi)) - math.pi
+	local turn = math.rad(b.traits.homing) * dt
+	local a = cur + math.max(-turn, math.min(turn, diff))
+	b.dx, b.dy = math.cos(a), math.sin(a)
+end
+
+--- Bounce a round off the edge of the playfield. Returns true while it still
+-- has bounces left, false when it has run out and should die at the wall.
+local function bounce(b)
+	local left = b.traits.ricochet - (b.bounces or 0)
+	if left <= 0 then return false end
+	local hit = false
+	if b.x < 0 or b.x > WORLD_W then
+		b.dx = -b.dx
+		b.x = math.max(0, math.min(WORLD_W, b.x))
+		hit = true
+	end
+	if b.y < 0 or b.y > WORLD_H then
+		b.dy = -b.dy
+		b.y = math.max(0, math.min(WORLD_H, b.y))
+		hit = true
+	end
+	if hit then
+		b.bounces = (b.bounces or 0) + 1
+		-- a bounce costs the round some of its reach, so a ricochet weapon is
+		-- about angles rather than about lasting forever
+		b.dist_left = math.max(b.dist_left, 160)
+	end
+	return true
+end
+
+--- Break a round into children when it stops. They carry the parent's family
+-- and a share of its damage, so splitting buys reach, not free damage.
+local function split_bullet(game, b)
+	local sp = b.traits and b.traits.split
+	if not sp or b.is_child then return end
+	local base = math.atan2(b.dy, b.dx)
+	local n = math.max(1, math.floor(sp.count))
+	for k = 1, n do
+		local t = (n == 1) and 0 or ((k - 1) / (n - 1) - 0.5) * 2
+		local a = base + math.rad(t * sp.spread)
+		game.bullets[#game.bullets + 1] = {
+			x = b.x, y = b.y,
+			dx = math.cos(a), dy = math.sin(a),
+			speed = b.speed * 0.85,
+			dist_left = 220,
+			damage = b.damage * (sp.damage or 0.5),
+			art = b.art,
+			weapon_id = b.weapon_id,
+			-- children do not split again, or one shot fills the field
+			is_child = true,
+		}
+	end
+end
+
+--- Arc on from the creature just hit to further ones, losing bite each jump.
+-- Reuses the shock-chain arc list, so it draws itself.
+local function chain_from(game, b, c)
+	local ch = b.traits.chain
+	local skip = { [c] = true }
+	local cx, cy = c.x, c.y
+	local damage = b.damage * ch.decay
+	for _ = 1, ch.jumps do
+		local next_c = nearest_creature(game, cx, cy, ch.range, skip)
+		if not next_c then break end
+		skip[next_c] = true
+		game.arcs[#game.arcs + 1] =
+			{ x1 = cx, y1 = cy, x2 = next_c.x, y2 = next_c.y, t = 0 }
+		damage_creature(game, next_c, damage)
+		cx, cy = next_c.x, next_c.y
+		damage = damage * ch.decay
+	end
+end
+
+-- A creature cannot be shrunk away to nothing: below this it stops changing.
+local MIN_CREATURE_SCALE = 0.4
+
+--- Traits that land on the creature rather than on the round.
+local function apply_on_hit(game, b, c)
+	local tr = b.traits
+	if not tr then return end
+	if tr.chain then chain_from(game, b, c) end
+	if tr.slow then
+		c.slow_t = tr.slow.seconds
+		c.slow_factor = tr.slow.factor
+	end
+	if tr.shrink then
+		-- c.scale is the creature's own copy, so this cannot leak into every
+		-- other creature sharing the variant. It shrinks the sprite, the hitbox
+		-- and the reach of its bite together, because they all read c.scale.
+		c.scale = math.max(MIN_CREATURE_SCALE, c.scale * tr.shrink)
+	end
+end
+
 --- One round connecting with one creature: what it throws, what it leaves on
 -- the ground, and what it does to the creature.
 local function hit_creature(game, b, c)
@@ -1569,35 +1726,67 @@ end
 local function update_bullets(game, dt)
 	for i = #game.bullets, 1, -1 do
 		local b = game.bullets[i]
+		local tr = b.traits
+
+		if tr and tr.homing then steer_homing(game, b, dt) end
+
 		local step = b.speed * dt
 		b.x = b.x + b.dx * step
 		b.y = b.y + b.dy * step
 		b.dist_left = b.dist_left - step
 		local dead = b.dist_left <= 0
+
+		-- off the edge: bounce if this round bounces, otherwise let it run out
+		if not dead and (b.x < 0 or b.x > WORLD_W or b.y < 0 or b.y > WORLD_H) then
+			if not (tr and tr.ricochet and bounce(b)) then dead = true end
+		end
+
 		-- rockets that reach max range detonate instead of fizzling
 		if dead and b.explosive then
 			explode(game, b.x, b.y, b.damage, b.art)
+		elseif dead and not b.hit and love.math.random() < MISS_MARK_CHANCE then
+			-- A round that hit nothing still went somewhere. Marking where it
+			-- landed is what makes a spray legible: the ground shows the shape
+			-- of what you did, not just the hits you got. Faint and occasional,
+			-- or a minigun paves the field.
+			game.ground_mark(b.x, b.y, 0.3 + love.math.random() * 0.2, {
+				family = b.art or "bullet",
+				rot = math.atan2(b.dy, b.dx),
+				stretch = 1.8,
+				alpha = 0.12 + love.math.random() * 0.1,
+			})
 		end
+
 		-- collide with creatures (circle radius ~16*scale)
 		if not dead then
 			for _, c in ipairs(game.creatures) do
-				if not c.dying then
-					local r = 16 * c.variant.scale + 6
+				if not c.dying and not (b.hit and b.hit[c]) then
+					local r = 16 * c.scale + 6
 					local ddx, ddy = c.x - b.x, c.y - b.y
 					if ddx * ddx + ddy * ddy < r * r then
-						dead = true
 						game.hits = game.hits + 1
 						if b.explosive then
 							explode(game, b.x, b.y, b.damage, b.art)
+							dead = true
 						else
 							hit_creature(game, b, c)
+							apply_on_hit(game, b, c)
+							-- pierce: through this many bodies before stopping.
+							-- The hit set is what stops one round scoring twice
+							-- on the same creature as it passes through it.
+							b.hit = b.hit or {}
+							b.hit[c] = true
+							b.pierced = (b.pierced or 0) + 1
+							if b.pierced > (tr and tr.pierce or 0) then dead = true end
 						end
-						break
+						if dead then break end
 					end
 				end
 			end
 		end
+
 		if dead then
+			split_bullet(game, b)
 			table.remove(game.bullets, i)
 		end
 	end
@@ -1620,8 +1809,29 @@ local function update_drops(game, dt)
 				ddx, ddy = p.x - d.x, p.y - d.y
 			end
 		end
-		if ddx * ddx + ddy * ddy < PICKUP_RADIUS * PICKUP_RADIUS then
+		-- a gun just dropped cannot be walked back onto until it settles
+		if d.arm_t then
+			d.arm_t = d.arm_t - dt
+			if d.arm_t <= 0 then d.arm_t = nil end
+		end
+		if d.arm_t == nil
+			and ddx * ddx + ddy * ddy < PICKUP_RADIUS * PICKUP_RADIUS then
 			if d.kind == "weapon" then
+				-- The gun you were holding goes on the ground rather than being
+				-- overwritten. That is what turns walking over a weapon from a
+				-- thing that happens to you into a decision: the swap is
+				-- reversible for a few seconds, and standing on the spot to undo
+				-- it costs you the ground you were holding.
+				if p.weapon and p.weapon ~= d.weapon then
+					game.drops[#game.drops + 1] = {
+						kind = "weapon", weapon = p.weapon,
+						x = d.x, y = d.y, t = 0,
+						-- short-lived, and it must not be picked up on the same
+						-- step that dropped it
+						life = DROPPED_WEAPON_LIFE,
+						arm_t = DROPPED_WEAPON_ARM,
+					}
+				end
 				p.weapon = d.weapon
 				p.reloading = 0
 				p.cooldown = 0
@@ -1648,7 +1858,7 @@ local function update_drops(game, dt)
 			end
 			particles.sparkle(d.x, d.y)
 			table.remove(game.drops, i)
-		elseif d.t > 30 then
+		elseif d.t > (d.life or 30) then
 			table.remove(game.drops, i) -- despawn eventually
 		end
 	end
@@ -1680,7 +1890,7 @@ local function update_creatures(game, dt)
 					love.graphics.setCanvas(game.terrain)
 					local v = c.variant
 					love.graphics.setColor(v.r, v.g, v.b, 1)
-					bms.draw(seq, seq.count, c.x, c.y, c.rot or 0, v.scale)
+					bms.draw(seq, seq.count, c.x, c.y, c.rot or 0, c.scale)
 					love.graphics.setColor(1, 1, 1, 1)
 					love.graphics.setCanvas()
 				end
@@ -1703,8 +1913,13 @@ local function update_creatures(game, dt)
 			local dist = math.sqrt(dx * dx + dy * dy)
 			-- Bad Blood slows them; Reflex Boost (perk or powerup) slows the
 			-- whole world, which for a creature is the same thing
+			-- Plasma leaves what it hits moving slower; the effect wears off.
+			if c.slow_t then
+				c.slow_t = c.slow_t - dt
+				if c.slow_t <= 0 then c.slow_t, c.slow_factor = nil, nil end
+			end
 			local speed = v.speed * SPEED_SCALE * game.mods.creature_speed
-				* world_rate(game)
+				* world_rate(game) * (c.slow_factor or 1)
 
 			-- movement by XML ai type. Dens/nests are stationary spawners
 			-- regardless of their nominal ai; IDLE stands its ground;
@@ -1735,8 +1950,8 @@ local function update_creatures(game, dt)
 					local w = data.weapons[v.weapon_id]
 					local a = math.atan2(dy, dx)
 					game.ebullets[#game.ebullets + 1] = {
-						x = c.x + math.cos(a) * 14 * v.scale,
-						y = c.y + math.sin(a) * 14 * v.scale,
+						x = c.x + math.cos(a) * 14 * c.scale,
+						y = c.y + math.sin(a) * 14 * c.scale,
 						dx = math.cos(a),
 						dy = math.sin(a),
 						speed = (w and w.projectile_speed or 10) * BULLET_SPEED_SCALE,
@@ -1768,12 +1983,16 @@ local function update_creatures(game, dt)
 
 			-- contact damage (Thick Skinned, Tough Reloader, Dodger, Highlander,
 			-- Cold-blooded, Living Fortress, Mr. Melee)
-			local touch = 16 * v.scale + 14
+			local touch = 16 * c.scale + 14
 			if dist < touch then
 				if c.attack_cd <= 0 and not game.effects.SHIELD
 					and v.damage > 0 then
 					c.attack_cd = 0.8
-					game.on_attacked(v.damage * game.damage_mul)
+					-- a shrunk creature bites for less: c.scale carries the
+					-- Shrinkifier's effect, and it is the whole point of a weapon
+					-- whose damage rating is otherwise the worst in the game
+					game.on_attacked(v.damage * game.damage_mul
+						* (c.scale / v.scale))
 					local snd = c.def and c.def.sounds and c.def.sounds.snd_attack_01
 					if snd and snd ~= "!NONE" then audio.play_sound(snd) end
 				end
@@ -1882,7 +2101,7 @@ function game.update(dt)
 	if was_frozen and not game.effects.FREEZE then
 		for _, c in ipairs(game.creatures) do
 			if not c.dying then
-				particles.ice_shatter(c.x, c.y, c.variant.scale)
+				particles.ice_shatter(c.x, c.y, c.scale)
 			end
 		end
 	end
@@ -2198,10 +2417,10 @@ local function draw_creature(game, c)
 	love.graphics.setColor(tr, tg, tb, 1)
 
 	if not seq then
-		love.graphics.circle("fill", c.x, c.y, 14 * v.scale)
+		love.graphics.circle("fill", c.x, c.y, 14 * c.scale)
 		return
 	end
-	bms.draw(seq, frame, c.x, c.y, rot, v.scale)
+	bms.draw(seq, frame, c.x, c.y, rot, c.scale)
 
 	-- The lit frame after a hit: the same frame again, additively, so the shape
 	-- that flashes is exactly the creature's own. This is what makes the
@@ -2211,7 +2430,7 @@ local function draw_creature(game, c)
 		local k = math.max(0, c.flash_t / HIT_FLASH) * 0.85
 		love.graphics.setBlendMode("add")
 		love.graphics.setColor(k, k, k, 1)
-		bms.draw(seq, frame, c.x, c.y, rot, v.scale)
+		bms.draw(seq, frame, c.x, c.y, rot, c.scale)
 		love.graphics.setBlendMode("alpha")
 	end
 
@@ -2224,7 +2443,7 @@ local function draw_creature(game, c)
 		local ice = bms.load("game/ice-cube.bms")
 		if ice then
 			love.graphics.setColor(1, 1, 1, 0.7)
-			bms.draw(ice, c.ice_frame or 1, c.x, c.y, 0, v.scale * 0.8)
+			bms.draw(ice, c.ice_frame or 1, c.x, c.y, 0, c.scale * 0.8)
 		end
 	end
 end
@@ -2415,16 +2634,29 @@ function game.draw()
 	-- what the bright things are throwing onto it
 	draw_lights(game)
 
-	-- powerup drops (under everything alive)
+	-- Drops, under everything alive. A weapon drop wears its own icon and its
+	-- family's colour on the plate, so what is lying there can be read from
+	-- across the field instead of discovered by standing on it -- which matters
+	-- now that stepping on one puts the gun in your hands and yours on the
+	-- ground.
 	local base_img = assets.image("powerups/base.png")
 	for _, d in ipairs(game.drops) do
 		local bob = math.sin(d.t * 3) * 3
-		local alpha = (d.t > 25) and (0.4 + 0.6 * math.abs(math.sin(d.t * 8))) or 1
-		love.graphics.setColor(1, 1, 1, alpha)
+		local life = d.life or 30
+		local alpha = (d.t > life - 5)
+			and (0.4 + 0.6 * math.abs(math.sin(d.t * 8))) or 1
+		local tint = d.kind == "weapon" and d.weapon
+			and FAMILY_TINT[d.weapon.proj_art] or nil
+		if tint then
+			love.graphics.setColor(tint[1], tint[2], tint[3], alpha)
+		else
+			love.graphics.setColor(1, 1, 1, alpha)
+		end
 		if base_img then
 			love.graphics.draw(base_img, d.x, d.y, 0, 0.7, 0.7,
 				base_img:getWidth() / 2, base_img:getHeight() / 2)
 		end
+		love.graphics.setColor(1, 1, 1, alpha)
 		local icon = assets.image(d.kind == "weapon" and d.weapon.icon
 			or d.kind == "powerup" and d.powerup.icon
 			or "powerups/powerup-medikit.png")
@@ -2440,7 +2672,7 @@ function game.draw()
 		local fade = c.dying
 			and math.max(0, 1 - (c.die_t or 0) / SHADOW_FADE)
 			or 1
-		draw_shadow(c.def, c.x, c.y, c.variant.scale, fade)
+		draw_shadow(c.def, c.x, c.y, c.scale, fade)
 	end
 	if game.player.hp > 0 then
 		draw_shadow(data.creatures.TROOPER, game.player.x, game.player.y, 1)
@@ -2469,14 +2701,21 @@ function game.draw()
 		else
 			love.graphics.circle("fill", p.x, p.y, 12)
 		end
-		-- muzzle flash
+		-- Muzzle flash, sized by what actually left the barrel: the shot's whole
+		-- damage output against the pistol's. A shotgun throwing twelve pellets
+		-- lights the field; a pistol does not. Same measure the spatter uses, so
+		-- the flash and the blood a shot causes agree with each other.
 		if p.muzzle > 0 then
 			local mf = assets.image("game/muzzle-flash.png")
 			if mf then
+				local w = p.weapon
+				local power = w and particles.power(
+					w.damage_effective * math.max(1, w.num_projectiles)) or 1
+				local s = 0.36 * power
 				love.graphics.setBlendMode("add")
 				love.graphics.setColor(1, 1, 1, p.muzzle / 0.05)
 				love.graphics.draw(mf, p.x + math.cos(p.angle) * 28, p.y + math.sin(p.angle) * 28,
-					p.angle, 0.5, 0.5, mf:getWidth() / 2, mf:getHeight() / 2)
+					p.angle, s, s, mf:getWidth() / 2, mf:getHeight() / 2)
 				love.graphics.setBlendMode("alpha")
 			end
 		end
@@ -2673,6 +2912,15 @@ end
 local function decorate_quest_screen(screen)
 	local comps = require("src.engine.comps")
 	local save = require("mods.vanilla.game.save")
+	-- The layout ships this textbox reading "1.10 8-legged Terror" — a
+	-- designer's sample, which the C++ engine overwrote on entry and which this
+	-- port showed to anyone who reached the screen by any route other than
+	-- clicking a chapter button. The original's quest names were compiled into
+	-- prog.dll and are not in the pak, so there is nothing true to put here:
+	-- blank beats a name that belongs to a different quest.
+	if screen.compmap.QuestName then
+		comps.set(screen.compmap.QuestName, "textbox.text", { "" })
+	end
 	for i = 1, save.QUESTS_PER_CHAPTER do
 		local comp = screen.compmap["Quest_" .. i]
 		if comp then

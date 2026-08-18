@@ -63,7 +63,7 @@ function gibs.spawn(c, mul)
 	local def, v = c.def, c.variant
 	if not def then return end
 	mul = mul or 1
-	local scale = v and v.scale or 1
+	local scale = c.scale or (v and v.scale) or 1
 	-- the same tint the corpse bakes with: a green alien sheds green parts
 	local tint = v and { v.r, v.g, v.b } or { 1, 1, 1 }
 

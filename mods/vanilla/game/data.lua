@@ -2,6 +2,9 @@
 
 local xml = require("src.xml")
 local paths = require("src.engine.paths")
+-- What a round does, as opposed to how big its numbers are. Mod-side, because
+-- the pak is read-only: see mods/vanilla/game/traits.lua.
+local traits = require("mods.vanilla.game.traits")
 
 local data = {}
 
@@ -119,6 +122,7 @@ function data.load_weapons()
 		local flags = to_num(a.flags, 0)
 		w.proj_art = projectile_art(w.id, to_num(a.type, 0), flags)
 		w.brass = math.floor(flags / BRASS_FLAG) % 2 == 1
+		w.traits = traits[w.id]
 		data.weapons[w.id] = w
 		data.weapon_order[w.index] = w
 	end

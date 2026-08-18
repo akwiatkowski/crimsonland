@@ -96,6 +96,23 @@ function hud.draw(field, camx, camy)
 			p.reloading > 0 and BLOOD or BRASS)
 	end
 
+	-- Standing on the HQ: the one place money becomes anything. Only while the
+	-- field is what you are looking at — the prompt telling you to open a
+	-- screen you already have open is how a HUD starts lying.
+	local on_field = (require("src.engine.screens").top() or {}).name == "GameCrimsonland"
+	if on_field and not p.dead_t and not field.over then
+		if field.near_hq then
+			text_center(F_MEDIUM, "E  -  HEADQUARTERS", W / 2, H - 96, TOXIC)
+		elseif field.near_plot then
+			local plot = field.near_plot
+			local what = (not plot.built) and "BUILD A MOUNT"
+				or (plot.weapon and ("MOUNT %d  -  %s"):format(plot.index,
+					plot.weapon.name or plot.weapon.id)
+				or ("MOUNT %d  -  EMPTY"):format(plot.index))
+			text_center(F_MEDIUM, ("E  -  %s"):format(what), W / 2, H - 96, TOXIC)
+		end
+	end
+
 	-- crosshair: the aim point in screen space
 	if p.aim_x and not p.dead_t then
 		local cx, cy = p.aim_x - camx, p.aim_y - camy

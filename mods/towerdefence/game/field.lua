@@ -28,7 +28,11 @@ local gibs = require("mods.vanilla.game.gibs")
 local input = require("mods.vanilla.game.input")
 local particles = require("mods.vanilla.game.particles")
 local terrain = require("mods.vanilla.game.terrain")
+local hq = require("mods.towerdefence.game.hq")
+local plots = require("mods.towerdefence.game.plots")
 local hud = require("mods.towerdefence.game.hud")
+local prices = require("mods.towerdefence.game.prices")
+local shooter = require("mods.towerdefence.game.shooter")
 local waves = require("mods.towerdefence.game.waves")
 
 local field = {}
@@ -76,6 +80,14 @@ local RESPAWN_TIME = 6 -- seconds you are off the field after dying
 local START_MONEY = 250
 local START_WEAPON = "ASSAULT_RIFLE"
 
+-- How close to the base the player has to be to trade. Wider than the base
+-- itself, so walking in works, but not so wide that the HQ can be used from
+-- the firing line.
+local HQ_RADIUS = 110
+-- How close to a plot you have to stand to build on it or change what it
+-- holds. Small: which mount you are working on must never be ambiguous.
+local PLOT_REACH = 60
+
 -- ---------------------------------------------------------------- session
 
 local function bake_terrain()
@@ -108,6 +120,13 @@ function field.start_run()
 	field.bullets = {}
 	field.ebullets = {}
 	field.money = START_MONEY
+	-- The arsenal. Weapons are objects you own, not a tier you have reached:
+	-- what is in your hands is one of them, and from slice three the rest are
+	-- what the mounts hold.
+	field.owned = { [START_WEAPON] = true }
+	field.plots = plots.create(BASE_X, BASE_Y)
+	field.near_hq = false
+	field.near_plot = nil
 	field.kills = 0
 	field.shots = 0
 	field.time = 0
@@ -223,77 +242,125 @@ end
 
 -- --------------------------------------------------------------- shooting
 --
--- One firing routine, because in slice three a tower is this same code with a
--- different brain choosing the angle (see the plan's "generalise the shooter").
--- `owner` is anything with x, y, angle, weapon, ammo, cooldown, reloading.
-
-local function clip_size(owner)
-	return owner.weapon and owner.weapon.clip_size or 0
-end
+-- The firing itself lives in game/shooter.lua, shared with the towers: the
+-- player and a mount are the same object with different brains, and this is
+-- the brain-free half. What stays here is only the two names vanilla's AI
+-- reads off a game table.
 
 --- Vanilla's AI controller (used by the autotest harness) reads `clip_size()`
 -- and `drops` off the game table, so this mod answers to the same names. Two
 -- lines to make every scripted-play test in src/test/ available here.
-function field.clip_size() return clip_size(field.player) end
-field.drops = {} -- nothing drops in slice one; the AI checks it for pickups
+function field.clip_size() return shooter.clip_size(field.player) end
+field.drops = {} -- nothing drops yet; the AI checks it for pickups
 
-local function fire(owner)
-	local w = owner.weapon
-	local range = w.projectile_range * RANGE_SCALE
-	owner.cooldown = w.shoot_interval
-	owner.ammo = math.max(0, owner.ammo - 1)
-	owner.muzzle = 0.05
-	field.shots = field.shots + 1
-	audio.play_sound(w.snd_fire, 1, 0, 1 + (love.math.random() - 0.5) / 6)
-	if w.brass then
-		fx.spawn("fxs/shells1.lua", owner.x + math.cos(owner.angle) * 14,
-			owner.y + math.sin(owner.angle) * 14, math.deg(owner.angle),
-			{ layer = "world", fade = 0.25 })
+-- ------------------------------------------------------------------ buying
+--
+-- Every purchase goes through here, because money is the game's only currency
+-- and the field is what owns it. The HQ screens ask; they never deduct.
+
+--- Buy back the base's health, or as much of it as the money covers. Partial
+-- is deliberate: being unable to afford a full repair should still leave you
+-- something to do with what you have, and the choice of how much to spend on
+-- walls versus guns is the decision the economy is built on.
+function field.repair()
+	local missing = field.base.max_hp - field.base.hp
+	if missing <= 0 or field.money <= 0 then return false end
+	local cost = prices.repair(missing)
+	if cost > field.money then
+		-- buy what the money reaches
+		missing = field.money / prices.REPAIR_PER_HP
+		cost = prices.repair(missing)
 	end
-	for _ = 1, w.num_projectiles do
-		local a = owner.angle + (love.math.random() - 0.5) * 2 * w.spread
-		field.bullets[#field.bullets + 1] = {
-			x = owner.x + math.cos(owner.angle) * 20,
-			y = owner.y + math.sin(owner.angle) * 20,
-			dx = math.cos(a), dy = math.sin(a),
-			speed = w.projectile_speed * BULLET_SPEED_SCALE,
-			dist_left = range,
-			damage = w.damage_effective,
-			art = w.proj_art,
-			bolt = w.proj_scale,
-			weapon_id = w.id,
-		}
-	end
+	field.money = field.money - cost
+	field.base.hp = math.min(field.base.max_hp, field.base.hp + missing)
+	audio.play_sound("sfx/unlocked")
+	announce(("Repaired %d for $%d"):format(math.floor(missing), cost))
+	return true
 end
 
---- Advance one shooter's weapon by dt. `wants_fire` and `wants_reload` are the
--- brain's answer; everything else is the weapon's own numbers.
-local function update_weapon(owner, dt, wants_fire, wants_reload)
-	local w = owner.weapon
-	if not w then return end
-	owner.cooldown = math.max(0, owner.cooldown - dt)
-	owner.muzzle = math.max(0, owner.muzzle - dt)
-
-	if owner.reloading > 0 then
-		owner.reloading = owner.reloading - dt
-		if owner.reloading <= 0 then owner.ammo = clip_size(owner) end
-		return
-	end
-	if wants_reload and owner.ammo < clip_size(owner) then
-		owner.reloading = w.reload_time
-		owner.reload_total = owner.reloading
-		audio.play_sound(w.snd_reload)
-		return
-	end
-	if wants_fire and owner.cooldown <= 0 then
-		if owner.ammo <= 0 then
-			owner.reloading = w.reload_time
-			owner.reload_total = owner.reloading
-			audio.play_sound(w.snd_reload)
-		else
-			fire(owner)
+--- Buy a weapon, or take one already owned into your hands. Owning is what
+-- costs; holding is free and reversible, which is what makes an arsenal worth
+-- having rather than a single upgrade path.
+function field.buy_weapon(w)
+	if not w then return false end
+	if not field.owned[w.id] then
+		local price = prices.weapon(w)
+		if not price or price > field.money then
+			audio.play_sound("sfx/locked") -- the pak's own "you cannot have this"
+			return false
 		end
+		field.money = field.money - price
+		field.owned[w.id] = true
+		announce(("Bought %s for $%d"):format(w.name or w.id, price))
 	end
+	field.player.weapon = w
+	field.player.ammo = w.clip_size
+	field.player.reloading = 0
+	audio.play_sound(w.snd_reload)
+	return true
+end
+
+--- Buy the ground: a plot becomes a mount that can hold something.
+function field.buy_plot(plot)
+	if plot.built or plots.BUILD_COST > field.money then
+		audio.play_sound("sfx/locked")
+		return false
+	end
+	field.money = field.money - plots.BUILD_COST
+	plot.built = true
+	plot.tier = 1
+	audio.play_sound("sfx/unlocked")
+	announce(("Mount built  -$%d"):format(plots.BUILD_COST))
+	return true
+end
+
+--- Reinforce a mount so it can hold the heavy end of the arsenal. This is the
+-- second half of what a big gun costs, and the reason buying one does not
+-- immediately mean eight of them.
+function field.upgrade_plot(plot)
+	if not plot.built or plot.tier >= 2 or plots.UPGRADE_COST > field.money then
+		audio.play_sound("sfx/locked")
+		return false
+	end
+	field.money = field.money - plots.UPGRADE_COST
+	plot.tier = 2
+	audio.play_sound("sfx/unlocked")
+	announce(("Mount reinforced  -$%d"):format(plots.UPGRADE_COST))
+	return true
+end
+
+--- Bolt a weapon on, buying it first if it is not owned. The mount holds its
+-- own copy: what is on a mount is not in your hands, which is what makes the
+-- perimeter a set of decisions rather than a display of everything you own.
+function field.mount_weapon(plot, w)
+	if not plots.accepts(plot, w) then
+		audio.play_sound("sfx/locked")
+		return false
+	end
+	if not field.owned[w.id] then
+		local price = prices.weapon(w)
+		if not price or price > field.money then
+			audio.play_sound("sfx/locked")
+			return false
+		end
+		field.money = field.money - price
+		field.owned[w.id] = true
+		announce(("Bought %s for $%d"):format(w.name or w.id, price))
+	end
+	plot.weapon = w
+	plot.ammo = w.clip_size
+	plot.reloading = 0
+	plot.cooldown = 0
+	audio.play_sound(w.snd_reload)
+	return true
+end
+
+--- Take the weapon off a mount. Free, and reversible: rearranging what you own
+-- as the waves change shape is the play, so it must never cost anything.
+function field.strip_plot(plot)
+	plot.weapon = nil
+	plot.target = nil
+	return true
 end
 
 -- ----------------------------------------------------------------- player
@@ -309,7 +376,7 @@ local function update_player(dt)
 			p.dead_t = nil
 			p.hp = p.max_hp
 			p.x, p.y = field.base.x, field.base.y + 60
-			p.ammo = clip_size(p)
+			p.ammo = shooter.clip_size(p)
 			p.reloading = 0
 		end
 		return
@@ -326,7 +393,13 @@ local function update_player(dt)
 	p.aim_x, p.aim_y = want.aim_x, want.aim_y
 	p.angle = math.atan2(p.aim_y - p.y, p.aim_x - p.x)
 
-	update_weapon(p, dt, want.fire, want.reload)
+	-- close enough to trade: the HUD says so, and E opens the door
+	local bdx, bdy = field.base.x - p.x, field.base.y - p.y
+	field.near_hq = (bdx * bdx + bdy * bdy) < HQ_RADIUS * HQ_RADIUS
+	-- and close enough to work on a mount, which is the other thing E does
+	field.near_plot = not field.near_hq and plots.at(field, p.x, p.y, PLOT_REACH) or nil
+
+	shooter.update(field, p, dt, want.fire, want.reload)
 end
 
 local function hurt_player(dmg)
@@ -378,6 +451,9 @@ local function update_bullets(dt)
 						if damage_creature(c, b.damage) then
 							particles.impact(b.art or "bullet", b.weapon_id,
 								b.x, b.y, dir, power * 1.5)
+							if b.owner then
+								b.owner.kills = (b.owner.kills or 0) + 1
+							end
 						end
 						dead = true
 						break
@@ -597,6 +673,7 @@ function field.update(dt)
 
 	if not field.over then
 		update_player(dt)
+		plots.update(field, dt) -- the mounts fight whether you are there or not
 		update_waves(dt)
 		update_creatures(dt)
 	end
@@ -719,6 +796,7 @@ function field.draw()
 		love.graphics.draw(field.terrain, 0, 0)
 	end
 	draw_base()
+	plots.draw(field) -- under everything alive: they are furniture, not actors
 
 	for _, c in ipairs(field.creatures) do
 		if not c.dying then draw_shadow(c.def, c.x, c.y, c.scale) end
@@ -788,10 +866,27 @@ function field.to_main_menu()
 	require("src.engine.timeline").begin("MainMenu")
 end
 
---- Slice one has no menus of its own: Play on the pak's main menu starts a
--- run, and a click on the field once the base is gone goes back to it. Both
--- are placeholders for the HQ screens of slice two.
+--- Keys the field itself answers to. Escape is the engine's (it pauses);
+-- everything else arrives here (src/engine/init.lua).
+function field.keypressed(key)
+	if not field.active or field.over then return end
+	if field.player.dead_t then return end
+	if key == "E" then
+		-- one key, two doors: the base trades, a plot builds. They can never
+		-- both be in reach (near_plot is only set away from the base).
+		if field.near_hq then
+			hq.open(field)
+		elseif field.near_plot then
+			hq.open_mount(field, field.near_plot)
+		end
+	end
+end
+
+--- There is still no menu of this mod's own: Play on the pak's main menu
+-- starts a run, and a click on the field once the base is gone goes back to
+-- it. The HQ screens, though, are real now — anything they own is theirs.
 function field.on_ui_click(screen_name, comp_name)
+	if hq.on_ui_click(screen_name, comp_name, field) then return true end
 	if screen_name == "MainMenu" and comp_name == "PlayMenu" then
 		field.start_run()
 		require("src.engine.timeline").begin("Game")
@@ -802,6 +897,14 @@ function field.on_ui_click(screen_name, comp_name)
 		return true
 	end
 	return false
+end
+
+function field.on_screen_enter(screen_name, screen)
+	hq.on_screen_enter(screen_name, screen)
+end
+
+function field.on_screen_draw(screen_name, screen)
+	hq.on_screen_draw(screen_name, screen)
 end
 
 return field

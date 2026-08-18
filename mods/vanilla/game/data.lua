@@ -25,6 +25,56 @@ end
 data.weapons = {} -- id -> table
 data.weapon_order = {} -- by numeric index
 
+-- What colour a weapon family burns, taken off the original's own art rather
+-- than chosen: the pak paints one ammo cell per family and every gun icon in
+-- the family in the same hue, so the answer was already in vendor/assets.
+-- Measured as the mean of the most saturated tenth of each icon's pixels:
+--
+--   weapons/ammo/plasma.png  rgb(251,192,  1)  hue  46 deg   amber
+--   plasma-{rifle,cannon,minigun,shotgun,multi}.png          hue  40-44 deg
+--   weapons/ammo/xenon.png   rgb( 12,135,214)  hue 203 deg   blue
+--   ion-{rifle,cannon,minigun,shotgun}, multi-ion.png        hue 215-217 deg
+--
+-- Plasma is the warm family and ion the cold one -- this port had them the
+-- other way round, and ion in a green the original uses nowhere. The pulse gun
+-- feeds off the plasma cell too (weapons.xml ammo_icon), which is why it is
+-- warm as well; its own arc-shaped sprite is what tells the two apart.
+--
+-- One table because a family has to read the same everywhere: the bolt in the
+-- air, the light it throws on the ground, the sparks off the hit, the mark it
+-- burns, the blast, and the plate it lies on as a drop. Two copies of these
+-- numbers is what let the bolt and the drop plate disagree before.
+data.FAMILY_COLOR = {
+	bullet = { 0.85, 0.8, 0.6 },
+	rocket = { 1.0, 0.6, 0.35 },
+	flame = { 1.0, 0.55, 0.2 },
+	plasma = { 1.0, 0.76, 0.15 },
+	ion = { 0.2, 0.6, 1.0 },
+	pulse = { 1.0, 0.9, 0.5 },
+	blade = { 0.8, 0.85, 0.9 },
+}
+
+-- How big an energy bolt is drawn, from the two numbers weapons.xml gives per
+-- round: how much damage it carries and how fast it travels. Slow and heavy
+-- draws big -- the two cannons fire the game's slowest, hardest-hitting round
+-- (speed 10, damage 28 and 16.7) and are meant to look like it, while a plasma
+-- shotgun's fourteen pellets are specks. It also puts the ion family above the
+-- plasma one at equal damage, which is the original's read of it: every ion
+-- gun fires at half its plasma counterpart's speed (rifle 15 vs 30, minigun
+-- 20 vs 35).
+--
+-- sqrt because the sprite is a disc: what a round carries reads as the area
+-- lit, not the radius. Calibrated on the family's two reference guns -- the
+-- plasma minigun's round stays the size it has been (0.48) and the plasma
+-- cannon's comes out three times its area (1.50).
+local BOLT_BASE = 0.31 -- floor, so a pellet is still visible
+local BOLT_GROWTH = 0.13
+local BOLT_REF_SPEED = 30 -- the plasma rifle's projectile_speed
+local function bolt_scale(damage, speed)
+	return BOLT_BASE + BOLT_GROWTH
+		* math.sqrt(damage * BOLT_REF_SPEED / math.max(1, speed))
+end
+
 -- Which sprite off game/projs.tga a weapon's rounds are drawn with.
 --
 -- weapons.xml carries the answer in two attributes nothing else in this port
@@ -121,6 +171,12 @@ function data.load_weapons()
 		w.spread = spread_of(w)
 		local flags = to_num(a.flags, 0)
 		w.proj_art = projectile_art(w.id, to_num(a.type, 0), flags)
+		-- only the two families drawn as a glowing blob have a size to set;
+		-- rockets, blades and the pulse arc are their own sprites at their own
+		-- size, and a kinetic round is a bullet
+		if w.proj_art == "plasma" or w.proj_art == "ion" then
+			w.proj_scale = bolt_scale(w.damage_effective, w.projectile_speed)
+		end
 		w.brass = math.floor(flags / BRASS_FLAG) % 2 == 1
 		w.traits = traits[w.id]
 		data.weapons[w.id] = w

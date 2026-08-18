@@ -172,6 +172,17 @@ NX_SetCursor NX_GetInterface NX_GetTime NX_FileExists NX_Popup NX_CallExtension`
   weapons.xml's own `type`/`flags` in `data.lua`; the `*-stencil.bms` pairs
   are parsed but deliberately unused — read `draw_creature`'s comment before
   wiring them to the variant colour, it has been tried
+- Weapon-family colour is measured, not chosen (`data.FAMILY_COLOR`, one table
+  every site reads): the pak paints one ammo cell per family and every gun icon
+  in that family in the same hue — `weapons/ammo/plasma.png` rgb(251,192,1),
+  hue 46 deg amber, and `ammo/xenon.png` rgb(12,135,214), hue 203 deg blue,
+  with the gun icons at 40-44 and 215-217. So **plasma is amber and ion is
+  blue** (the port had them swapped, ion in a green the original uses nowhere);
+  the pulse gun feeds off the plasma cell too, hence warm. Energy bolt *size*
+  is per weapon from the same XML — `sqrt(damage * 30 / speed)`, so the two
+  cannons (speed 10, damage 28 and 16.7) are the game's biggest rounds and the
+  ion family outsizes plasma at equal damage because every ion gun fires at
+  half its plasma counterpart's speed
 - `hud.lua` — in-game HUD from the original 2014 art (game/health_pie_*,
   aim_circle/dot crosshair with reload sweep, progress-bar XP strip,
   levelup-ring, white-vignette low-hp breathing); bone/blood/brass/toxic

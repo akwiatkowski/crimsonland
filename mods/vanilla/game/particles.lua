@@ -17,6 +17,8 @@
 -- not the pak's, so they belong to the mod.
 
 local fx = require("src.engine.fx")
+-- the weapon families' colours, measured off the original's own icons
+local FAMILY = require("mods.vanilla.game.data").FAMILY_COLOR
 
 local particles = {}
 
@@ -49,11 +51,12 @@ local IMPACT = {
 	rocket = { spray = BLOOD },
 	-- the blade cuts, so the spray follows the edge instead of fanning
 	blade = { spray = NARROW },
-	-- energy: blood plus sparks in the colour of the bolt that made them
-	flame = { spray = BLOOD, extra = SPARK, tint = { 1.0, 0.55, 0.2 } },
-	plasma = { spray = BLOOD, extra = SPARK, tint = { 0.55, 0.8, 1.0 } },
-	ion = { spray = BLOOD, extra = SPARK, tint = { 0.6, 1.0, 0.65 } },
-	pulse = { spray = BLOOD, extra = SPARK, tint = { 1.0, 0.9, 0.5 } },
+	-- energy: blood plus sparks in the colour of the bolt that made them --
+	-- the family's own colour, off the original's icons (game/data.lua)
+	flame = { spray = BLOOD, extra = SPARK, tint = FAMILY.flame },
+	plasma = { spray = BLOOD, extra = SPARK, tint = FAMILY.plasma },
+	ion = { spray = BLOOD, extra = SPARK, tint = FAMILY.ion },
+	pulse = { spray = BLOOD, extra = SPARK, tint = FAMILY.pulse },
 }
 
 -- The gauss family shares `flags=1` with the plain shotgun and assault rifle,

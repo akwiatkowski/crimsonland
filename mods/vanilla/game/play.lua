@@ -902,6 +902,9 @@ local function update_player(game, dt)
 					-- gun it left, which is the only way to tell a gauss round
 					-- from any other kinetic one
 					art = w.proj_art,
+					-- how big this gun's bolt is drawn, for the energy
+					-- families that are drawn as one (nil for everything else)
+					bolt = w.proj_scale,
 					weapon_id = w.id,
 					-- what this round *does*: see game/traits.lua
 					traits = w.traits,
@@ -1212,26 +1215,19 @@ local function update_impact(game, dt)
 	end
 end
 
+-- What a weapon family looks like, on its ground drop's plate. The colours
+-- themselves are read off the original's own icons in game/data.lua; every
+-- other place a family shows itself takes them from there too, so a family
+-- reads the same whether it is being fired, exploding, or lying in the grass.
+local FAMILY_TINT = data.FAMILY_COLOR
+
 -- What colour a blast burns. The fireball art is painted for ordnance, so a
 -- rocket takes it as it is; the energy weapons tint it towards their own bolt
 -- rather than asking for a second sheet of hand-painted fire.
--- What a weapon family looks like, on its ground drop's plate. Same colours
--- the blasts and impact sparks use, so a family reads the same whether it is
--- being fired, exploding, or lying in the grass.
-local FAMILY_TINT = {
-	bullet = { 0.85, 0.8, 0.6 },
-	rocket = { 1.0, 0.6, 0.35 },
-	flame = { 1.0, 0.55, 0.2 },
-	plasma = { 0.55, 0.8, 1.0 },
-	ion = { 0.6, 1.0, 0.65 },
-	pulse = { 1.0, 0.9, 0.5 },
-	blade = { 0.8, 0.85, 0.9 },
-}
-
 local BLAST_TINT = {
-	plasma = { 0.55, 0.8, 1.0 },
-	ion = { 0.6, 1.0, 0.65 },
-	pulse = { 1.0, 0.9, 0.5 },
+	plasma = FAMILY_TINT.plasma,
+	ion = FAMILY_TINT.ion,
+	pulse = FAMILY_TINT.pulse,
 }
 
 -- ------------------------------------------------------------------ decals
@@ -1263,9 +1259,9 @@ local MARK = {
 	rocket = { rect = MARK_SPLAT, color = { 1, 1, 1 }, alpha = 0.55 },
 	blade = { rect = MARK_SPLAT, color = { 1, 1, 1 }, alpha = 0.6 },
 	flame = { rect = MARK_SOOT, color = { 0.12, 0.1, 0.1 }, alpha = 0.5 },
-	plasma = { rect = MARK_BURN, color = { 0.5, 0.7, 1.0 }, alpha = 0.28 },
-	ion = { rect = MARK_BURN, color = { 0.55, 1.0, 0.6 }, alpha = 0.28 },
-	pulse = { rect = MARK_BURN, color = { 1.0, 0.85, 0.5 }, alpha = 0.28 },
+	plasma = { rect = MARK_BURN, color = FAMILY_TINT.plasma, alpha = 0.28 },
+	ion = { rect = MARK_BURN, color = FAMILY_TINT.ion, alpha = 0.28 },
+	pulse = { rect = MARK_BURN, color = FAMILY_TINT.pulse, alpha = 0.28 },
 }
 
 local DECAL_HIT_CHANCE = 0.35
@@ -2526,6 +2522,13 @@ end
 local BULLET_TRAIL = 22
 
 local PROJ_SHEET = "game/projs.tga"
+-- An energy bolt's size rides on the round (game/data.lua computes it per
+-- weapon); this is only what to draw when something fires one without a
+-- weapon behind it, and how much wider the light under a bolt is than the
+-- bolt itself.
+local BOLT_FALLBACK = 0.55
+local BOLT_LIGHT = 2.9
+
 local PROJ_RECT = {
 	rocket = { 104, 5, 16, 20 },
 	glow = { 69, 5, 22, 22 },
@@ -2590,10 +2593,12 @@ local function draw_lights(game)
 	for _, b in ipairs(game.bullets) do
 		if b.flame or b.fire then
 			draw_proj("glow", b.x, b.y, 0, 1.8, 1, 0.5, 0.15, 0.22, true)
-		elseif b.art == "plasma" then
-			draw_proj("glow", b.x, b.y, 0, 1.6, 0.5, 0.75, 1, 0.2, true)
-		elseif b.art == "ion" then
-			draw_proj("glow", b.x, b.y, 0, 1.6, 0.55, 1, 0.6, 0.2, true)
+		elseif b.art == "plasma" or b.art == "ion" then
+			-- the light a bolt throws is the bolt, three times over: a cannon
+			-- ball lights the ground it crosses, a shotgun pellet barely does
+			local c = FAMILY_TINT[b.art]
+			draw_proj("glow", b.x, b.y, 0, (b.bolt or BOLT_FALLBACK) * BOLT_LIGHT,
+				c[1], c[2], c[3], 0.2, true)
 		elseif b.art == "pulse" then
 			draw_proj("glow", b.x, b.y, 0, 2.0, 1, 0.9, 0.5, 0.22, true)
 		end
@@ -2743,10 +2748,13 @@ function game.draw()
 		elseif b.art == "blade" then
 			-- a thrown blade spins on its own axis, not along its path
 			draw_proj("blade", b.x, b.y, game.time * 16, 1, 1, 1, 1, 1, false)
-		elseif b.art == "plasma" then
-			draw_proj("glow", b.x, b.y, rot, 0.55, 0.55, 0.8, 1, 0.9, true)
-		elseif b.art == "ion" then
-			draw_proj("glow", b.x, b.y, rot, 0.5, 0.6, 1, 0.65, 0.9, true)
+		elseif b.art == "plasma" or b.art == "ion" then
+			-- one sprite, two families: the colour and the size are the
+			-- weapon's own (game/data.lua), which is what makes an ion cannon's
+			-- slow blue ball and a plasma shotgun's amber spark the same art
+			local c = FAMILY_TINT[b.art]
+			draw_proj("glow", b.x, b.y, rot, b.bolt or BOLT_FALLBACK,
+				c[1], c[2], c[3], 0.9, true)
 		elseif b.art == "pulse" then
 			-- the bright edge of the arc has to lead, and the sprite is painted
 			-- with it along the top, so the wave turns a quarter past its heading

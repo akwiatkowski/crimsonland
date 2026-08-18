@@ -24,10 +24,20 @@ local shooter = require("mods.towerdefence.game.shooter")
 
 local plots = {}
 
--- Eight plots on a ring: enough that no single one covers two approaches, few
--- enough that early money cannot buy the whole perimeter.
+-- Two rings of eight. The inner one is the perimeter you can afford early:
+-- close enough that one mount covers a lot of the approach to the base, and
+-- cheap. The outer one intercepts further out -- more warning, more time for a
+-- wave to be worn down before it arrives -- but it is a longer circumference,
+-- so holding it means buying more of it. Extending outward is a commitment to
+-- a bigger perimeter, which is the same decision a real defence makes.
 local PLOT_COUNT = 8
-local PLOT_RING = 250 -- world pixels from the base
+local INNER_RING = 250 -- world pixels from the base
+local OUTER_RING = 430
+
+-- The outer ring opens once the core is actually held. Not an arbitrary gate:
+-- a player who extends outward before the inner ring can cover itself ends up
+-- with two thin rings instead of one solid one, and finds out four waves later.
+plots.OUTER_REQUIRES = 4 -- inner mounts built
 
 -- What a mount reaches. Most weapons carry 1200 pixels of range, which is
 -- wider than the screen and would make where a mount stands irrelevant. Flame
@@ -42,7 +52,23 @@ local TURN_RATE = 2.6 -- radians per second
 local FIRE_CONE = 0.18 -- radians of slop before it will pull the trigger
 
 plots.BUILD_COST = 250
+plots.OUTER_BUILD_COST = 400 -- further out, more exposed, more to hold
 plots.UPGRADE_COST = 600
+
+--- What building on this plot costs, and whether it can be built on at all.
+-- Returns cost, or nil plus the reason it is not available yet.
+function plots.build_cost(field, plot)
+	if not plot.outer then return plots.BUILD_COST end
+	local inner = 0
+	for _, p in ipairs(field.plots) do
+		if p.built and not p.outer then inner = inner + 1 end
+	end
+	if inner < plots.OUTER_REQUIRES then
+		return nil, ("Hold the inner ring first (%d of %d mounts)")
+			:format(inner, plots.OUTER_REQUIRES)
+	end
+	return plots.OUTER_BUILD_COST
+end
 
 -- Tier one holds the light end of the arsenal; anything heavier needs the
 -- reinforced mount. This is what stops "buy the best gun, bolt it on
@@ -53,12 +79,19 @@ plots.TIER1_MAX_DPS = 12
 -- which is also the order the HUD lists them in.
 function plots.create(base_x, base_y)
 	local list = {}
-	for i = 1, PLOT_COUNT do
-		local a = -math.pi / 2 + (i - 1) * (2 * math.pi / PLOT_COUNT)
+	for i = 1, PLOT_COUNT * 2 do
+		local outer = i > PLOT_COUNT
+		local n = outer and (i - PLOT_COUNT) or i
+		-- the outer ring is offset by half a step, so it covers the gaps the
+		-- inner ring leaves rather than hiding behind it
+		local a = -math.pi / 2 + (n - 1) * (2 * math.pi / PLOT_COUNT)
+			+ (outer and (math.pi / PLOT_COUNT) or 0)
+		local ring = outer and OUTER_RING or INNER_RING
 		list[i] = {
 			index = i,
-			x = base_x + math.cos(a) * PLOT_RING,
-			y = base_y + math.sin(a) * PLOT_RING,
+			outer = outer or nil,
+			x = base_x + math.cos(a) * ring,
+			y = base_y + math.sin(a) * ring,
 			built = false,
 			tier = 0,
 			-- a mount is a shooter, so it carries a shooter's fields

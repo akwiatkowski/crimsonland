@@ -134,7 +134,9 @@ end
 local function mount_labels(plot)
 	local out = {}
 	if not plot.built then
-		out[#out + 1] = { name = "Build", text = ("Build mount  -  $%d"):format(plots.BUILD_COST) }
+		local cost, why = plots.build_cost(field, plot)
+		out[#out + 1] = { name = "Build",
+			text = cost and ("Build mount  -  $%d"):format(cost) or why }
 		return out
 	end
 	out[#out + 1] = {
@@ -187,7 +189,8 @@ local function draw_mount_screen(screen)
 	end
 	line(F_MEDIUM, ("$%d"):format(field.money), py + 74, BRASS)
 	if not plot.built then
-		line(F_SMALL, "Bare ground on the perimeter", py + 108, DIM)
+		line(F_SMALL, plot.outer and "Bare ground, on the outer ring"
+			or "Bare ground on the perimeter", py + 108, DIM)
 	elseif plot.weapon then
 		line(F_SMALL, ("%s  -  reach %d"):format(plot.weapon.name or plot.weapon.id,
 			math.floor(plots.range(plot))), py + 108, BONE)
@@ -333,6 +336,16 @@ end
 
 function hq.close()
 	screens.pop(HQ_SCREEN)
+end
+
+--- Shut every counter at once. Used when the field decides the player has
+-- stopped being someone who can shop — being killed at the counter, mostly,
+-- which is now possible because a shop no longer stops the wave.
+function hq.close_all()
+	for _, name in ipairs({ CARDS, ARMOURY, MOUNT_SCREEN, HQ_SCREEN }) do
+		if screens.find(name) then screens.pop(name) end
+	end
+	mount_target = nil
 end
 
 function hq.is_open()

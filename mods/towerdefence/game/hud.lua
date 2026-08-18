@@ -24,6 +24,7 @@ local BONE = { 0.91, 0.89, 0.84 }
 local BLOOD = { 0.70, 0.13, 0.16 }
 local BRASS = { 0.79, 0.64, 0.29 }
 local TOXIC = { 0.50, 0.73, 0.31 }
+local DIM = { 0.45, 0.44, 0.42 }
 
 local F_SMALL = "fonts/small.mft"
 local F_MEDIUM = "fonts/medium.mft"
@@ -145,11 +146,20 @@ function hud.draw(field, camx, camy)
 
 	if field.over then
 		love.graphics.setColor(0, 0, 0, 0.6)
-		love.graphics.rectangle("fill", 0, H / 2 - 70, W, 140)
-		text_center(F_MEDIUM, "THE BASE HAS FALLEN", W / 2, H / 2 - 40, BLOOD)
+		love.graphics.rectangle("fill", 0, H / 2 - 80, W, 170)
+		text_center(F_MEDIUM, "THE BASE HAS FALLEN", W / 2, H / 2 - 50, BLOOD)
 		text_center(F_SMALL, ("Wave %d  -  %d kills"):format(field.wave, field.kills),
-			W / 2, H / 2, BONE)
-		text_center(F_SMALL, "Click to return to the menu", W / 2, H / 2 + 30, BRASS)
+			W / 2, H / 2 - 14, BONE)
+		-- The wave you reached is the whole score: no levels, no unlocks, just
+		-- how far. So the run has to end by saying whether it was your furthest.
+		local best = field.progress()
+		if field.new_best then
+			text_center(F_SMALL, "A NEW BEST", W / 2, H / 2 + 12, TOXIC)
+		else
+			text_center(F_SMALL, ("Best: wave %d"):format(best.best_wave),
+				W / 2, H / 2 + 12, DIM)
+		end
+		text_center(F_SMALL, "Click to return to the menu", W / 2, H / 2 + 44, BRASS)
 		love.graphics.setColor(1, 1, 1, 1)
 	end
 end

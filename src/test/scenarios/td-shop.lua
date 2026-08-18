@@ -59,20 +59,24 @@ return {
 	{ t = 60.0, run = report("wave2") },
 	{ t = 130.0, run = report("wave3") },
 
+	-- Quickly: since the pause exploit was fixed the field keeps running under
+	-- a shop screen, so a shopper standing at the counter mid-wave is being
+	-- bitten while they browse -- and dying closes the shop. Half-second steps
+	-- are what a player in a hurry does, and what this test has to do too.
 	{ t = 140.0, run = stand_on_base },
-	{ t = 142.0, key = "e" }, -- the HQ opens
-	{ t = 143.0, run = report("in-hq") },
-	{ t = 144.0, click = "Armoury" },
-	{ t = 145.5, click = "Weapon_9" }, -- Plasma Rifle at $3320: still out of reach
-	{ t = 146.5, run = report("refused") },
-	{ t = 147.5, click = "Weapon_3" }, -- Shotgun at $940: the first real upgrade
-	{ t = 148.5, run = report("bought") },
-	{ t = 149.5, click = "Back" },
-	{ t = 150.5, click = "Repair" }, -- whatever is left goes into the walls
-	{ t = 151.5, run = report("repaired") },
-	{ t = 152.5, click = "Close" },
+	{ t = 141.0, key = "e" }, -- the HQ opens
+	{ t = 141.5, run = report("in-hq") },
+	{ t = 142.0, click = "Armoury" },
+	{ t = 142.5, click = "Weapon_9" }, -- Plasma Rifle at $3320: still out of reach
+	{ t = 143.0, run = report("refused") },
+	{ t = 143.5, click = "Weapon_3" }, -- Shotgun at $940: the first real upgrade
+	{ t = 144.0, run = report("bought") },
+	{ t = 144.5, click = "Back" },
+	{ t = 145.0, click = "Repair" }, -- whatever is left goes into the walls
+	{ t = 145.5, run = report("repaired") },
+	{ t = 146.0, click = "Close" },
 
-	{ t = 153.0, run = take_over }, -- back to defending, with the new gun
+	{ t = 146.5, run = take_over }, -- back to defending, with the new gun
 	{ t = 175.0, run = report("fighting") },
 	captures = { 143.5, 147.0, 175.0 },
 }

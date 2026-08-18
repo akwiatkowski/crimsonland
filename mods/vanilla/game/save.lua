@@ -123,6 +123,13 @@ function save.load()
 		save.game.seen.weapons = seen.weapons or {}
 		save.game.seen.perks = seen.perks or {}
 		for k, v in pairs(state.game.stats or {}) do save.game.stats[k] = v end
+		-- Anything this module does not know about belongs to whoever put it
+		-- there: a mod reusing this save (mods/towerdefence keeps its best wave
+		-- here) would otherwise watch its own progress vanish on load, because
+		-- every field above is copied by name.
+		for k, v in pairs(state.game) do
+			if save.game[k] == nil then save.game[k] = v end
+		end
 		-- saves written before per-mode bests existed only knew survival
 		if not save.game.bests.survival and save.game.survival_best.score > 0 then
 			save.game.bests.survival = save.game.survival_best

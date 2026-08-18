@@ -140,6 +140,8 @@ function field.start_run()
 	field.shots = 0
 	field.time = 0
 	field.over = false
+	field.new_best = nil
+	field.best_before = nil
 
 	-- wave state: the run opens in a lull, so the first thing the player does
 	-- is read what is coming rather than react to it
@@ -156,6 +158,16 @@ function field.start_run()
 	audio.switch_music("music/gt1_ingame", 0, 1)
 	print("[td] run started")
 end
+
+-- Where a run's result goes. The save module is vanilla's -- same format,
+-- this mod's own directory (src/engine/mod.lua) -- and this table is the part
+-- that belongs to tower defence. Nothing else reads it.
+local function progress()
+	local game = require("mods.vanilla.game.save").game
+	game.td = game.td or { best_wave = 0, runs = 0, best_kills = 0 }
+	return game.td
+end
+field.progress = progress
 
 local function announce(text)
 	field.banner, field.banner_t = text, 3.5
@@ -317,15 +329,17 @@ end
 
 --- Buy the ground: a plot becomes a mount that can hold something.
 function field.buy_plot(plot)
-	if plot.built or plots.BUILD_COST > field.money then
+	local cost, why = plots.build_cost(field, plot)
+	if plot.built or not cost or cost > field.money then
 		audio.play_sound("sfx/locked")
+		if why then announce(why) end
 		return false
 	end
-	field.money = field.money - plots.BUILD_COST
+	field.money = field.money - cost
 	plot.built = true
 	plot.tier = 1
 	audio.play_sound("sfx/unlocked")
-	announce(("Mount built  -$%d"):format(plots.BUILD_COST))
+	announce(("Mount built  -$%d"):format(cost))
 	return true
 end
 
@@ -437,6 +451,15 @@ local function update_player(dt)
 		p.hp = math.min(p.max_hp, p.hp + field.mods.regen * dt)
 	end
 
+	-- At a counter the player is a body standing still: no walking, no
+	-- shooting, and the wave does not care. Reload keeps ticking, because
+	-- reloading is the one thing you can do while talking to the quartermaster.
+	if field.busy then
+		p.moving = false
+		shooter.update(field, p, dt, false, false)
+		return
+	end
+
 	local want = input.intent(field, dt)
 	p.moving = (want.dx ~= 0 or want.dy ~= 0)
 	if p.moving then
@@ -468,6 +491,9 @@ local function hurt_player(dmg)
 		p.dead_t = RESPAWN_TIME
 		particles.blood(p.x, p.y, love.math.random() * math.pi * 2, 1.5)
 		announce("You are down - respawning")
+		-- killed at the counter: the shop closes, because whatever was being
+		-- browsed is now happening to someone else
+		hq.close_all()
 	end
 end
 
@@ -478,8 +504,21 @@ local function hurt_base(dmg)
 	if b.hp <= 0 then
 		b.hp = 0
 		field.over = true
+		hq.close_all()
+		-- how far this one got, kept across runs: with no levels and no
+		-- unlocks, the wave you reached is the entire score
+		local best = progress()
+		best.runs = best.runs + 1
+		field.best_before = best.best_wave
+		if field.wave > best.best_wave then
+			best.best_wave = field.wave
+			best.best_kills = field.kills
+			field.new_best = true
+		end
+		require("mods.vanilla.game.save").flush()
 		announce(("The base has fallen - wave %d"):format(field.wave))
-		print(("[td] run over at wave %d, %d kills"):format(field.wave, field.kills))
+		print(("[td] run over at wave %d, %d kills (best %d)")
+			:format(field.wave, field.kills, best.best_wave))
 	end
 end
 
@@ -720,10 +759,17 @@ end
 
 function field.update(dt)
 	if not field.active then return end
-	-- any UI screen over the field pauses it, the same rule vanilla uses
-	local screens = require("src.engine.screens")
-	local top = screens.top()
-	if top and top.name ~= "GameCrimsonland" then return end
+	local top = require("src.engine.screens").top()
+	local on_top = top and top.name
+
+	-- Only the pause screen stops the clock. A shop does NOT: the HQ sits at
+	-- the centre of the map so that going there costs you the perimeter, and a
+	-- shop that froze the wave would refund exactly that cost -- which is the
+	-- decision the whole layout exists to force. Trading mid-wave is allowed,
+	-- and it is supposed to hurt.
+	if not on_top or on_top == "GamePause" then return end
+	-- hands full: standing at a counter is not standing on the line
+	field.busy = (on_top ~= "GameCrimsonland")
 
 	field.time = field.time + dt
 	if field.banner_t > 0 then field.banner_t = field.banner_t - dt end

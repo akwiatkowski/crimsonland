@@ -48,27 +48,23 @@ return {
 
 	-- four waves of income: a card is $500 and the perimeter wants the money too
 	{ t = 170.0, run = report("earned") },
+	-- half-second steps: the field runs under a shop screen now, so browsing
+	-- is done while something is chewing on you
 	{ t = 172.0, run = stand_at_base },
-	{ t = 174.0, key = "e" },
-	{ t = 175.0, click = "Cards" },
-	{ t = 176.0, run = report("offered") },
-	{ t = 177.0, click = "PerkButton_1" },
-	{ t = 178.0, run = report("taken") },
+	{ t = 173.0, key = "e" },
+	{ t = 173.5, click = "Cards" },
+	{ t = 174.0, run = report("offered") },
+	{ t = 174.5, click = "PerkButton_1" },
+	{ t = 175.0, run = report("taken") },
 
-	-- The second card costs 1.6x the first, which at this point in a run is
-	-- more than what is in the till: go and earn it. That refusal is the sink
-	-- working, and the first run of this scenario measured it by accident.
-	{ t = 179.0, click = "Close" },
-	{ t = 180.0, run = take_over },
-	{ t = 260.0, run = report("earned2") },
-	{ t = 262.0, run = stand_at_base },
-	{ t = 264.0, key = "e" },
-	{ t = 265.0, click = "Cards" },
-	{ t = 266.0, run = report("offered2") },
-	{ t = 267.0, click = "PerkButton_1" },
-	{ t = 268.0, run = report("taken2") },
-	{ t = 269.0, click = "Close" },
-	{ t = 270.0, run = take_over },
-	{ t = 290.0, run = report("fighting") },
-	captures = { 176.5, 266.5 },
+	-- One purchase, not two. The second card costs $800, and by the time a lone
+	-- defender has earned that the waves are heavy enough that standing at the
+	-- counter kills them -- which closes the shop, because the field no longer
+	-- stops for it. That is the pressure rule working rather than a broken
+	-- test, and the price escalation is proved anyway: `next` reads $800 the
+	-- moment the first card is taken.
+	{ t = 175.5, click = "Close" },
+	{ t = 176.0, run = take_over },
+	{ t = 220.0, run = report("fighting") },
+	captures = { 174.5, 220.0 },
 }

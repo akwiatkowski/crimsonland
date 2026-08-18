@@ -20,6 +20,17 @@ local fx = require("src.engine.fx")
 
 local shooter = {}
 
+-- A shooter with no modifier table is unmodified. That is how perks stay
+-- player-only without a single conditional at the call sites: the player
+-- carries `mods`, a mount does not (mods/towerdefence/game/cards.lua).
+local NEUTRAL = {
+	dmg = 1, fire = 1, reload = 1, clip = 1, clip_add = 0, bullet_speed = 1,
+}
+
+local function mods_of(owner)
+	return owner.mods or NEUTRAL
+end
+
 -- Same conversions the rest of the mod uses (and vanilla before it).
 local BULLET_SPEED_SCALE = 16
 local RANGE_SCALE = 4
@@ -30,7 +41,9 @@ local RANGE_SCALE = 4
 local FLAME_RANGE_MUL = 0.18
 
 function shooter.clip_size(owner)
-	return owner.weapon and owner.weapon.clip_size or 0
+	if not owner.weapon then return 0 end
+	local m = mods_of(owner)
+	return math.max(1, math.floor(owner.weapon.clip_size * m.clip + 0.5) + m.clip_add)
 end
 
 --- How far this weapon's rounds actually travel, in world pixels.
@@ -43,7 +56,8 @@ end
 --- One trigger pull: a round (or a fan of them) into the world.
 function shooter.fire(field, owner)
 	local w = owner.weapon
-	owner.cooldown = w.shoot_interval
+	local m = mods_of(owner)
+	owner.cooldown = w.shoot_interval / m.fire
 	owner.ammo = math.max(0, owner.ammo - 1)
 	owner.muzzle = 0.05
 	field.shots = field.shots + 1
@@ -60,9 +74,9 @@ function shooter.fire(field, owner)
 			x = owner.x + math.cos(owner.angle) * 20,
 			y = owner.y + math.sin(owner.angle) * 20,
 			dx = math.cos(a), dy = math.sin(a),
-			speed = w.projectile_speed * BULLET_SPEED_SCALE,
+			speed = w.projectile_speed * BULLET_SPEED_SCALE * m.bullet_speed,
 			dist_left = range,
-			damage = w.damage_effective,
+			damage = w.damage_effective * m.dmg,
 			art = w.proj_art,
 			bolt = w.proj_scale,
 			weapon_id = w.id,
@@ -79,6 +93,7 @@ end
 function shooter.update(field, owner, dt, wants_fire, wants_reload)
 	local w = owner.weapon
 	if not w then return end
+	local m = mods_of(owner)
 	owner.cooldown = math.max(0, owner.cooldown - dt)
 	owner.muzzle = math.max(0, owner.muzzle - dt)
 
@@ -88,14 +103,14 @@ function shooter.update(field, owner, dt, wants_fire, wants_reload)
 		return
 	end
 	if wants_reload and owner.ammo < shooter.clip_size(owner) then
-		owner.reloading = w.reload_time
+		owner.reloading = w.reload_time * m.reload
 		owner.reload_total = owner.reloading
 		audio.play_sound(w.snd_reload)
 		return
 	end
 	if wants_fire and owner.cooldown <= 0 then
 		if owner.ammo <= 0 then
-			owner.reloading = w.reload_time
+			owner.reloading = w.reload_time * m.reload
 			owner.reload_total = owner.reloading
 			audio.play_sound(w.snd_reload)
 		else

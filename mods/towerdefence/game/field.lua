@@ -27,7 +27,9 @@ local fx = require("src.engine.fx")
 local gibs = require("mods.vanilla.game.gibs")
 local input = require("mods.vanilla.game.input")
 local particles = require("mods.vanilla.game.particles")
+local perks = require("mods.vanilla.game.perks")
 local terrain = require("mods.vanilla.game.terrain")
+local cards = require("mods.towerdefence.game.cards")
 local hq = require("mods.towerdefence.game.hq")
 local plots = require("mods.towerdefence.game.plots")
 local hud = require("mods.towerdefence.game.hud")
@@ -124,6 +126,13 @@ function field.start_run()
 	-- what is in your hands is one of them, and from slice three the rest are
 	-- what the mounts hold.
 	field.owned = { [START_WEAPON] = true }
+	-- Perks are the player's own handling, so the modifier table lives on the
+	-- player: game/shooter.lua reads `owner.mods`, and a mount has none.
+	field.mods = perks.fresh_mods()
+	field.player.mods = field.mods
+	field.owned_perks = {}
+	field.cards_taken = 0
+	field.card_offer = nil
 	field.plots = plots.create(BASE_X, BASE_Y)
 	field.near_hq = false
 	field.near_plot = nil
@@ -164,7 +173,7 @@ local function add_creature(variant, x, y)
 		variant = variant,
 		def = data.creatures[variant.type],
 		x = x, y = y,
-		hp = variant.health * w.health_mul,
+		hp = variant.health * w.health_mul * field.mods.creature_hp,
 		scale = variant.scale,
 		anim_t = love.math.random() * 2,
 		attack_cd = 0,
@@ -206,7 +215,9 @@ local KILL_PAY_MAX = 60
 
 local function pay_for(c)
 	local pay = math.floor(c.variant.xp / KILL_PAY_DIVISOR)
-	field.money = field.money + math.max(1, math.min(KILL_PAY_MAX, pay))
+	pay = math.max(1, math.min(KILL_PAY_MAX, pay))
+	-- the original's "more points" perks pay in the only currency this mod has
+	field.money = field.money + math.floor(pay * field.mods.score_mul)
 end
 
 local function kill_creature(c, overkill)
@@ -218,6 +229,10 @@ local function kill_creature(c, overkill)
 	gibs.spawn(c, overkill and 2.5 or 1)
 	field.kills = field.kills + 1
 	pay_for(c)
+	if field.mods.kill_heal > 0 and not field.player.dead_t then
+		field.player.hp = math.min(field.player.max_hp,
+			field.player.hp + field.mods.kill_heal)
+	end
 	local snd = c.def and c.def.sounds
 	if snd then
 		local picks = {}
@@ -363,6 +378,42 @@ function field.strip_plot(plot)
 	return true
 end
 
+--- Pay for a look at three cards. The money buys the *offer*, not the pick, so
+-- an offer full of things you do not want is a real outcome and the price of
+-- the next one still goes up.
+function field.buy_cards()
+	local cost = cards.cost(field.cards_taken)
+	if cost > field.money then
+		audio.play_sound("sfx/locked")
+		return false
+	end
+	local offer = cards.offer(3, field.owned_perks)
+	if #offer == 0 then
+		announce("Nothing left to learn")
+		return false
+	end
+	field.money = field.money - cost
+	field.card_paid = (field.card_paid or 0) + cost
+	field.card_offer = offer
+	audio.play_sound("sfx/unlock_perk")
+	return true
+end
+
+--- Take one. The modifiers land on the player's own table, which is what makes
+-- perks player-only: a mount has no `mods`, so shooter.lua treats it neutrally.
+function field.take_card(perk)
+	if not perk or field.owned_perks[perk.id] then return false end
+	field.owned_perks[perk.id] = true
+	field.cards_taken = field.cards_taken + 1
+	perk.apply(field.mods, field)
+	field.card_offer = nil
+	-- a bigger clip is only bigger once it is filled
+	field.player.ammo = math.min(shooter.clip_size(field.player), field.player.ammo)
+	announce(("%s"):format(perk.name))
+	print(("[td] perk taken: %s"):format(perk.name))
+	return true
+end
+
 -- ----------------------------------------------------------------- player
 
 local function update_player(dt)
@@ -382,12 +433,17 @@ local function update_player(dt)
 		return
 	end
 
+	if field.mods.regen > 0 then
+		p.hp = math.min(p.max_hp, p.hp + field.mods.regen * dt)
+	end
+
 	local want = input.intent(field, dt)
 	p.moving = (want.dx ~= 0 or want.dy ~= 0)
 	if p.moving then
 		local len = math.sqrt(want.dx * want.dx + want.dy * want.dy)
-		p.x = math.max(16, math.min(WORLD_W - 16, p.x + want.dx / len * p.speed * dt))
-		p.y = math.max(16, math.min(WORLD_H - 16, p.y + want.dy / len * p.speed * dt))
+		local speed = p.speed * field.mods.speed
+		p.x = math.max(16, math.min(WORLD_W - 16, p.x + want.dx / len * speed * dt))
+		p.y = math.max(16, math.min(WORLD_H - 16, p.y + want.dy / len * speed * dt))
 		p.anim_t = p.anim_t + dt
 	end
 	p.aim_x, p.aim_y = want.aim_x, want.aim_y
@@ -405,7 +461,8 @@ end
 local function hurt_player(dmg)
 	local p = field.player
 	if p.dead_t then return end
-	p.hp = p.hp - dmg
+	-- Thick Skinned and its family: what actually lands on you
+	p.hp = p.hp - dmg * field.mods.taken
 	if p.hp <= 0 then
 		p.hp = 0
 		p.dead_t = RESPAWN_TIME
@@ -547,7 +604,7 @@ local function update_creatures(dt)
 			local tx, ty, what = target_of(c)
 			local dx, dy = tx - c.x, ty - c.y
 			local dist = math.sqrt(dx * dx + dy * dy)
-			local speed = v.speed * SPEED_SCALE
+			local speed = v.speed * SPEED_SCALE * field.mods.creature_speed
 
 			-- the reach of the thing being walked at: a man is a point, the
 			-- base is seventy pixels of wall

@@ -22,6 +22,7 @@ local font = require("src.engine.font")
 local gallery = require("mods.vanilla.game.gallery")
 local save = require("mods.vanilla.game.save")
 local screens = require("src.engine.screens")
+local cards = require("mods.towerdefence.game.cards")
 local plots = require("mods.towerdefence.game.plots")
 local prices = require("mods.towerdefence.game.prices")
 
@@ -30,6 +31,9 @@ local hq = {}
 local HQ_SCREEN = "TDHeadquarters"
 local MOUNT_SCREEN = "TDMount"
 local ARMOURY = "Weapons"
+-- the original's own card screen, six plates and a pair of textboxes that
+-- follow the pointer. Bought here rather than earned on a level-up.
+local CARDS = "PickAPerk"
 
 -- The plot the armoury was opened for, if it was opened from one. With it set,
 -- clicking a weapon bolts it on (buying it first if you do not own it yet);
@@ -83,7 +87,10 @@ screens.register_internal(HQ_SCREEN, function(screen)
 	comps.set(repair, "button.text", { repair_label() })
 	local armoury = add(screen, "Button", "Armoury", "WideButton", 0.5, 0.55)
 	comps.set(armoury, "button.text", { "Armoury" })
-	local close = add(screen, "Button", "Close", "WideButton", 0.5, 0.66)
+	local training = add(screen, "Button", "Cards", "WideButton", 0.5, 0.66)
+	comps.set(training, "button.text",
+		{ ("Training  -  $%d"):format(cards.cost(field and field.cards_taken or 0)) })
+	local close = add(screen, "Button", "Close", "WideButton", 0.5, 0.77)
 	comps.set(close, "button.text", { "Back to the field" })
 
 	screen.env.OnKeyDown = function(key)
@@ -195,6 +202,45 @@ local function draw_mount_screen(screen)
 	end
 end
 
+-- ---------------------------------------------------------------- the cards
+
+--- The original's card screen, filled with the offer the field paid for. Its
+-- six plates carry icons only; the name and description belong to the pair of
+-- textboxes that follow the pointer, which is how the layout was drawn.
+local function set_card_desc(screen, perk)
+	if screen.compmap.PerkName then
+		comps.set(screen.compmap.PerkName, "textbox.text", { perk.name })
+	end
+	if screen.compmap.PerkDesc then
+		comps.set(screen.compmap.PerkDesc, "textbox.text", { perk.desc })
+	end
+end
+
+local function fill_cards(screen)
+	local offer = field and field.card_offer
+	if not offer then return end
+	if screen.compmap.Title then
+		comps.set(screen.compmap.Title, "textbox.text",
+			{ ("Training  -  $%d spent"):format(field.card_paid or 0) })
+	end
+	for i = 1, 6 do
+		local b = screen.compmap["PerkButton_" .. i]
+		if b then
+			comps.set(b, "visible", { offer[i] ~= nil })
+			if offer[i] then comps.set(b, "button.bm_icon", { offer[i].icon }) end
+		end
+	end
+	if offer[1] then set_card_desc(screen, offer[1]) end
+end
+
+--- Hovering a plate previews what it does, which is the only way to choose.
+local function update_card_hover(screen)
+	local hover = screen._hover_comp
+	local n = hover and hover.name:match("^PerkButton_(%d+)$")
+	local perk = n and field and field.card_offer and field.card_offer[tonumber(n)]
+	if perk then set_card_desc(screen, perk) end
+end
+
 -- -------------------------------------------------------------- the armoury
 
 --- Every weapon shows its own art in a shop: the gallery's locked plates mean
@@ -297,7 +343,9 @@ end
 -- --------------------------------------------------------------- mod hooks
 
 function hq.on_screen_enter(screen_name, screen)
-	if screen_name == ARMOURY then
+	if screen_name == CARDS then
+		fill_cards(screen)
+	elseif screen_name == ARMOURY then
 		mark_all_seen()
 		gallery.fill(screen, "Weapon", "weapon")
 		local title = screen.compmap.TimeTitle
@@ -312,6 +360,8 @@ function hq.on_screen_draw(screen_name, screen)
 		draw_mount_screen(screen)
 	elseif screen_name == ARMOURY then
 		draw_armoury(screen)
+	elseif screen_name == CARDS then
+		update_card_hover(screen)
 	end
 end
 
@@ -328,8 +378,28 @@ function hq.on_ui_click(screen_name, comp_name, f)
 			if btn then comps.set(btn, "button.text", { repair_label() }) end
 		elseif comp_name == "Armoury" then
 			screens.push(ARMOURY)
+		elseif comp_name == "Cards" then
+			-- paid for on opening, not on choosing: the offer is what the money
+			-- buys, and walking away from three cards you dislike is a real
+			-- (bad) outcome rather than a free look
+			if field.buy_cards() then screens.push(CARDS) end
 		elseif comp_name == "Close" then
 			hq.close()
+		end
+		return true
+	elseif screen_name == CARDS then
+		local n = comp_name:match("^PerkButton_(%d+)$")
+		local perk = n and field.card_offer and field.card_offer[tonumber(n)]
+		if perk then
+			field.take_card(perk)
+			screens.pop(CARDS)
+			-- the next card costs more, and the button says so
+			local s = screens.find(HQ_SCREEN)
+			local btn = s and s.compmap.Cards
+			if btn then
+				comps.set(btn, "button.text",
+					{ ("Training  -  $%d"):format(cards.cost(field.cards_taken)) })
+			end
 		end
 		return true
 	elseif screen_name == ARMOURY then

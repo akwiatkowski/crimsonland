@@ -31,8 +31,18 @@ end
 -- achievements, statistics, settings — belongs to one cartridge: a debug mod
 -- that hands out every weapon must not be able to mark a quest completed on
 -- the profile the base game reads. Nothing writes above USER.
+--
+-- CL_SHARD gives one autotest run a directory of its own. A sweep runs several
+-- scenarios at once (tools/sweep.sh), and they would otherwise be six
+-- processes interleaving writes into one save file — which is not a test of
+-- anything, and the corruption would land on whichever run read it next.
 local APP_SUPPORT = love.filesystem.getUserDirectory() .. "Library/Application Support/"
-local APP = APP_SUPPORT .. (is_autotest() and "Crimsonland-Test" or "Crimsonland")
+local function test_dir()
+	local shard = os.getenv("CL_SHARD")
+	if shard and shard ~= "" then return "Crimsonland-Test-" .. shard end
+	return "Crimsonland-Test"
+end
+local APP = APP_SUPPORT .. (is_autotest() and test_dir() or "Crimsonland")
 
 return {
 	ASSETS = "vendor/assets", -- main data.pak contents

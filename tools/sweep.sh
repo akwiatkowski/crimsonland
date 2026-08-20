@@ -1,0 +1,179 @@
+#!/usr/bin/env bash
+#
+# Run one axis of the autotest matrix to exhaustion, in parallel, and tabulate.
+#
+#   tools/sweep.sh matrix        30 weapons x 13 creature types  (390 fights)
+#   tools/sweep.sh variants      every creature variant, one weapon (69)
+#   tools/sweep.sh bake          7 chapters x 10 quests of ground (70)
+#   tools/sweep.sh modes         the six endless modes (6)
+#   tools/sweep.sh named         every hand-written scenario in src/test
+#   tools/sweep.sh all           all of the above
+#
+# Second argument is the job count (default 6). Each job is a whole LÖVE
+# process; they are headless and share nothing but the CPU, so the only real
+# ceiling is core count.
+#
+# The lists are read out of vendor/assets rather than written down here: a
+# sweep that has to be edited when the data changes is a sweep that silently
+# stops covering things.
+#
+# Per-run isolation: CL_SHARD gives every process its own save directory
+# (src/engine/paths.lua), or six runs interleave writes into one save file.
+# They are named Crimsonland-Test-<pid> under Application Support and this
+# script removes the ones it created when the sweep ends.
+#
+# A run is a failure if LÖVE exits non-zero, which the harness makes mean
+# exactly one of: a scenario expectation failed, or Lua threw. A run that hangs
+# is killed by the per-run alarm and counted as a failure too.
+
+set -uo pipefail
+
+SWEEP="${1:-matrix}"
+JOBS="${2:-6}"
+LIMIT="${CL_LIMIT:-180}" # wall-clock seconds one run may take
+LOVE="${LOVE:-$HOME/Applications/love.app/Contents/MacOS/love}"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ASSETS="$ROOT/vendor/assets"
+OUT="${CL_SWEEP_OUT:-${TMPDIR:-/tmp}/cl-sweep}"
+
+# ---------------------------------------------------------------- one run
+
+if [ "$SWEEP" = "--run" ]; then
+	IFS='|' read -r label mod scenario envs <<<"$2"
+	log="$OUT/$label.log"
+	# alarm survives exec, so this is a timeout without a timeout(1)
+	# shellcheck disable=SC2086  # $envs is a list of VAR=value on purpose
+	env $envs CL_SHARD="$$" perl -e 'alarm shift; exec @ARGV' "$LIMIT" \
+		"$LOVE" "$ROOT" --mod="$mod" --autotest="$scenario" >"$log" 2>&1
+	code=$?
+	printf '%d\t%s\n' "$code" "$label" >>"$OUT/results.tsv"
+	if [ "$code" -eq 0 ]; then printf '.'; else printf '\n[FAIL %s] %s\n' "$code" "$label"; fi
+	exit 0
+fi
+
+# ---------------------------------------------------------------- the lists
+
+weapon_slots() {
+	# The gallery grid is the picker (mods/allweapons/picker.lua), so a weapon
+	# is reachable only if the original's layout gave it a plate. It ships 30,
+	# and weapons.xml carries 31 player weapons -- the Shrinkifier 5K has no
+	# plate and cannot be selected here.
+	grep -oE "Weapon_[0-9]+" "$ASSETS/ui/weapons.lua" |
+		sed 's/Weapon_//' | sort -un
+}
+
+creature_types() {
+	grep -oE '<array id="[A-Z_0-9]+"' "$ASSETS/creatures/creatures.xml" |
+		sed 's/<array id="//;s/"//'
+}
+
+creature_variants() {
+	grep -oE '<node id="Variant_[0-9]+"' "$ASSETS/creatures/creature-variants.xml" |
+		sed 's/<node id="//;s/"//' | sort -u
+}
+
+chapters() {
+	# NUM_CHAPTERS, from the game rather than from memory
+	grep -oE "local NUM_CHAPTERS = [0-9]+" "$ROOT/mods/vanilla/game/play.lua" |
+		grep -oE "[0-9]+"
+}
+
+named_scenarios() {
+	# the hand-written ones; the parameterised three are the sweeps themselves
+	for f in "$ROOT"/src/test/scenarios/*.lua; do
+		n="$(basename "$f" .lua)"
+		case "$n" in matrix | bake | mode) ;; *) echo "$n" ;; esac
+	done
+}
+
+jobs_for() {
+	case "$1" in
+	matrix)
+		for w in $(weapon_slots); do
+			for c in $(creature_types); do
+				echo "matrix-w$w-$c|allweapons|matrix|CL_WEAPON=$w CL_CREATURE=$c"
+			done
+		done
+		;;
+	variants)
+		# one weapon for every variant: the assault rifle, because a mid-range
+		# automatic gets shots into anything the AI can reach
+		for v in $(creature_variants); do
+			echo "variant-$v|allweapons|matrix|CL_WEAPON=2 CL_CREATURE=$v"
+		done
+		;;
+	bake)
+		for ch in $(seq 1 "$(chapters)"); do
+			for q in $(seq 1 10); do
+				echo "bake-$ch-$q|vanilla|bake|CL_CHAPTER=$ch CL_QUEST=$q"
+			done
+		done
+		;;
+	modes)
+		for m in survival rush blitz waves nukefism weaponpicker; do
+			echo "mode-$m|vanilla|mode|CL_MODE=$m"
+		done
+		;;
+	named)
+		for s in $(named_scenarios); do
+			# allweapons-* are the only ones that need the debug cartridge
+			case "$s" in allweapons-*) echo "named-$s|allweapons|$s|CL_NAMED=1" ;;
+			*) echo "named-$s|vanilla|$s|CL_NAMED=1" ;; esac
+		done
+		;;
+	*) echo "unknown sweep '$1'" >&2 && exit 2 ;;
+	esac
+}
+
+# ---------------------------------------------------------------- the sweep
+
+[ "$SWEEP" = "all" ] && SWEEPS="named modes bake variants matrix" || SWEEPS="$SWEEP"
+
+test -x "$LOVE" || {
+	echo "LÖVE not found at $LOVE" >&2
+	exit 1
+}
+mkdir -p "$OUT"
+: >"$OUT/results.tsv"
+
+started="$(date +%s)"
+total=0
+for s in $SWEEPS; do
+	list="$(jobs_for "$s")"
+	n="$(echo "$list" | grep -c .)"
+	total=$((total + n))
+	echo "== $s: $n runs, $JOBS at a time"
+	echo "$list" | tr '\n' '\0' | xargs -0 -P "$JOBS" -n1 "$0" --run
+	echo
+done
+elapsed=$(($(date +%s) - started))
+
+# the per-run save directories this sweep created
+find "$HOME/Library/Application Support" -maxdepth 1 -name 'Crimsonland-Test-*' \
+	-type d -exec rm -rf {} + 2>/dev/null
+
+# ---------------------------------------------------------------- the table
+
+fails="$(awk -F'\t' '$1 != 0' "$OUT/results.tsv" | sort -k2)"
+nfail="$(echo "$fails" | grep -c .)"
+{
+	echo "sweep: $SWEEPS"
+	echo "runs:  $total in ${elapsed}s at $JOBS jobs"
+	echo "pass:  $((total - nfail))"
+	echo "fail:  $nfail"
+	if [ "$nfail" -gt 0 ]; then
+		echo
+		printf '%-38s %-5s %s\n' LABEL EXIT WHY
+		echo "$fails" | while IFS=$'\t' read -r code label; do
+			why="$(grep -hE '^\[test\] (FAIL|ERROR)' "$OUT/$label.log" 2>/dev/null |
+				head -2 | tr '\n' ' ')"
+			[ -z "$why" ] && why="(no verdict — killed after ${LIMIT}s or died early)"
+			printf '%-38s %-5s %s\n' "$label" "$code" "$why"
+		done
+	fi
+	echo
+	echo "== reported lines"
+	grep -hE '^\[(matrix|bake|mode)\]' "$OUT"/*.log 2>/dev/null | sort
+} | tee "$OUT/report.txt"
+
+[ "$nfail" -eq 0 ]

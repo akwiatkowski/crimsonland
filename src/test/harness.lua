@@ -162,13 +162,58 @@ local RANDOM_SEED = 20140101
 -- one would spin a core until then, so scenarios now end themselves.
 local LINGER = 1.0
 
+-- --------------------------------------------------------------- verdicts
+--
+-- A scenario used to have no way to fail. It drove the game, printed what it
+-- saw and always exited 0, so "did that work?" was a human reading captures —
+-- which is fine for one scenario and impossible for a few hundred. A step can
+-- now carry `expect = function() return ok, why end`, and the run's exit code
+-- is the answer: 0 all clear, 1 something failed.
+--
+-- Deliberately no `expect` that repairs anything, and no tolerance knob. An
+-- expectation that a run cannot meet is either a bug in the game or a claim
+-- the scenario should not have made.
+
+local failures = {}
+
+local function check(step, index)
+	local ok, why = step.expect()
+	if ok then
+		print(("[test] ok   %s"):format(why or ("expect #" .. index)))
+	else
+		failures[#failures + 1] = why or ("expect #" .. index)
+		print(("[test] FAIL %s"):format(why or ("expect #" .. index)))
+	end
+end
+
+-- ------------------------------------------------------------ error trapping
+--
+-- LÖVE's stock handler draws an error screen and keeps the loop alive until
+-- somebody closes the window. Under --autotest there is no window to close
+-- (conf.lua creates it hidden), so any Lua error used to mean a process
+-- spinning a core until it was killed by hand — the one failure mode a matrix
+-- run cannot survive. Trade the error screen for a traceback and exit 1.
+local function install_errorhandler()
+	-- love.errorhandler IS xpcall's message handler, so the stack it asks for
+	-- is the one that threw, not this function's own.
+	love.errorhandler = function(msg)
+		print("[test] ERROR " .. tostring(msg))
+		print(debug.traceback("", 2))
+		-- os.exit rather than returning nil: returning hands control back to
+		-- love.boot, which has its own opinions about what to draw next.
+		os.exit(1, true)
+	end
+	love.errhand = love.errorhandler -- the 0.10 name, still consulted
+end
+
 -- ------------------------------------------------------------ scenario run
 
 --- Wrap love.update to execute a scenario (src/test/scenarios/<name>.lua):
--- a list of timed steps {t=, click=|key=} plus a `captures` time list.
+-- a list of timed steps {t=, click=|key=|expect=} plus a `captures` time list.
 function harness.install(scenario_name)
 	local scenario = require("src.test.scenarios." .. scenario_name)
 	print(("[test] running scenario '%s'"):format(scenario_name))
+	install_errorhandler()
 
 	-- keep the test window out of the user's way (best effort)
 	pcall(love.window.minimize)
@@ -183,6 +228,9 @@ function harness.install(scenario_name)
 	local step_idx = 1
 	local capture_idx = 1
 	local captures = scenario.captures or {}
+	local dismiss = scenario.dismiss or {}
+	local dismiss_set = {}
+	for _, name in ipairs(dismiss) do dismiss_set[name] = true end
 	-- A capture reads the canvas, which only the next draw refreshes — so it
 	-- is requested here and taken by the loop below, after presenting.
 	local capture_due = false
@@ -210,7 +258,23 @@ function harness.install(scenario_name)
 			-- escape hatch for subsystems a player cannot reach from input
 			-- alone (the game polls love.mouse.isDown, which cannot be faked)
 			if step.run then step.run() end
+			if step.expect then check(step, step_idx - 1) end
 		end
+		-- Screens that dismiss on a click anywhere, dismissed. A scenario that
+		-- hands the player to the AI otherwise stops exercising the game the
+		-- first time it picks up a weapon it has never held: the unlock
+		-- celebration goes up, the game underneath stops being updated, and
+		-- nothing fails -- combat-smoke was spending better than half its run
+		-- frozen behind one, reporting the same numbers twice. A human clicks;
+		-- so does this. Named by the scenario because which screens work that
+		-- way is the mod's business, not the engine's.
+		if dismiss[1] then
+			local top = screens.top()
+			if top and not top.leaving and dismiss_set[top.name] then
+				harness.click_at(screens.WIDTH / 2, screens.HEIGHT / 2)
+			end
+		end
+
 		if captures[capture_idx] and elapsed >= captures[capture_idx] then
 			capture_idx = capture_idx + 1
 			capture_due = true
@@ -222,7 +286,10 @@ function harness.install(scenario_name)
 			and elapsed >= last + LINGER then
 			done = true
 			print(("[test] scenario '%s' complete (%.1fs)"):format(scenario_name, elapsed))
-			love.event.quit(0)
+			if #failures > 0 then
+				print(("[test] %d FAILED: %s"):format(#failures, table.concat(failures, "; ")))
+			end
+			love.event.quit(#failures > 0 and 1 or 0)
 		end
 	end
 

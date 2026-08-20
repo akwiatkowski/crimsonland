@@ -182,6 +182,24 @@ function data.load_weapons()
 		data.weapons[w.id] = w
 		data.weapon_order[w.index] = w
 	end
+
+	-- The highest index a player may be handed, which is not the same as the
+	-- highest index in the file. weapons.xml runs 1..32 and then jumps to 44,
+	-- 45, 46, 47, 48, 63: creature guns (SPIDER_PLASMA, MONSTER_PLASMA), the
+	-- fire-bullets powerup, and cut content nobody ever held (BUBBLEGUN,
+	-- MEGALASER, UNKNOWN). The player weapons are the leading run that carries
+	-- an icon -- 1..31, ending at the Shrinkifier -- so read that off the data
+	-- rather than writing 31 down, and the answer follows the file if it ever
+	-- changes. `#weapon_order` cannot be used for this: the array is sparse, so
+	-- the length operator is free to answer anything, and it answers 48.
+	data.last_player_weapon = 0
+	while true do
+		local w = data.weapon_order[data.last_player_weapon + 1]
+		if not (w and w.icon) then break end
+		data.last_player_weapon = data.last_player_weapon + 1
+	end
+
+	loaded.weapons = true
 end
 
 -- ------------------------------------------------------------ creatures

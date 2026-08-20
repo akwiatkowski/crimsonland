@@ -327,7 +327,11 @@ function game.start_custom(quest)
 	game.custom_next = 1 -- index into quest.spawns
 	game.kills_goal = nil -- the spawn list decides when it is over
 	game.diff_mul = 1
-	game.weapon_cap = #data.weapon_order
+	-- an authored quest has no chapter to gate its drops, so every weapon a
+	-- player can hold is in -- and nothing above that: `#weapon_order` is a
+	-- length over a sparse array and answers 48, which put the spider's own
+	-- plasma gun and the boss's in the drop table (see data.last_player_weapon)
+	game.weapon_cap = data.last_player_weapon
 	game.spawn_interval = math.huge -- the generic spawner stays out of this
 	game.max_concurrent = 0
 	game.health_mul, game.damage_mul = HEALTH_SCALE_BASE, DAMAGE_SCALE_BASE

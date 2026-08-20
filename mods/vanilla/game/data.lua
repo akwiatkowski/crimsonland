@@ -162,11 +162,38 @@ function data.load_weapons()
 		-- 10, ...). Derive the rest from the stat_damage rating, calibrated
 		-- so the pistol's derived DPS matches its authored value:
 		-- pistol dps = 4.1 / 0.7117 = 5.76 at stat 0.3 -> dps = 19.2 * stat.
+		--
+		-- That derivation was per *shot interval*, which reads the weapon as
+		-- if it fired for ever: a gun that shoots twice as fast got half the
+		-- damage a shot and came out even. A magazine is what a player
+		-- actually spends, and it is not the same trade -- the flamethrower's
+		-- 30 rounds leave in a quarter of a second and then it reloads for
+		-- two, so 19.2 * stat * 0.0081 put 3.7 damage in a full magazine
+		-- where the pistol's held 49 and the minigun's 111. Landing every
+		-- round of it on one 68 hp alien would not kill it, which is what the
+		-- matrix sweep found: across 12 fights each, the three flame weapons
+		-- managed 5 kills between them off 2234 hits, where no other weapon
+		-- needed more than 33 hits for a kill.
+		--
+		-- So the rate that matters is the sustained one, reload included:
+		-- a magazine costs `clip * shoot_interval + reload_time` seconds
+		-- whatever order those go in. Calibrated on the same weapon as before
+		-- -- the pistol's authored 4.1 over a 12-round, 9.54-second cycle is
+		-- 5.16 dps at stat 0.3, so 17.2 dps per unit of stat_damage.
+		--
+		-- Still a heuristic: stat_damage is the rating the gallery draws, not
+		-- a damage coefficient, and against the nine weapons that do carry an
+		-- authored value it lands within 16.9x either way (the interval form
+		-- was 35.2x, and low by a geometric mean of 0.54 where this is 0.77).
+		-- Better calibrated, not correct -- and it leaves all nine of those
+		-- weapons exactly as authored.
+		local MAGAZINE_DPS_PER_STAT = 17.2
 		if w.projectile_damage > 1.5 then
 			w.damage_effective = w.projectile_damage
 		else
-			w.damage_effective = 19.2 * w.stat_damage * w.shoot_interval
-				/ math.max(1, w.num_projectiles)
+			local cycle = w.clip_size * w.shoot_interval + w.reload_time
+			w.damage_effective = MAGAZINE_DPS_PER_STAT * w.stat_damage * cycle
+				/ math.max(1, w.clip_size) / math.max(1, w.num_projectiles)
 		end
 		w.spread = spread_of(w)
 		local flags = to_num(a.flags, 0)

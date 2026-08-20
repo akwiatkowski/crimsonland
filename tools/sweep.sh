@@ -5,6 +5,8 @@
 #   tools/sweep.sh matrix        30 weapons x 13 creature types  (390 fights)
 #   tools/sweep.sh variants      every creature variant, one weapon (69)
 #   tools/sweep.sh bake          7 chapters x 10 quests of ground (70)
+#   tools/sweep.sh variety       each chapter's ten grounds, compared (7)
+#   tools/sweep.sh lethality     every weapon against the first enemy (30)
 #   tools/sweep.sh modes         the six endless modes (6)
 #   tools/sweep.sh named         every hand-written scenario in src/test
 #   tools/sweep.sh all           all of the above
@@ -64,12 +66,30 @@ weapon_slots() {
 }
 
 creature_types() {
-	grep -oE '<array id="[A-Z_0-9]+"' "$ASSETS/creatures/creatures.xml" |
-		sed 's/<array id="//;s/"//'
+	# From the variants file, not from creatures.xml: creatures.xml is the art
+	# and sound table and includes TROOPER, which is the player's own sprite
+	# (play.lua draws the marine from data.creatures.TROOPER). What can be
+	# spawned is what some variant claims a type for. The difference is printed
+	# below rather than quietly dropped.
+	grep -oE 'type="[A-Z_0-9]+"' "$ASSETS/creatures/creature-variants.xml" |
+		sed 's/type="//;s/"//' | sort -u
+}
+
+creature_types_unspawnable() {
+	comm -23 \
+		<(grep -oE '<array id="[A-Z_0-9]+"' "$ASSETS/creatures/creatures.xml" |
+			sed 's/<array id="//;s/"//' | sort -u) \
+		<(creature_types)
 }
 
 creature_variants() {
-	grep -oE '<node id="Variant_[0-9]+"' "$ASSETS/creatures/creature-variants.xml" |
+	# Every node in the file, not the Variant_NN ones: two thirds of them are
+	# numbered and a third are named -- StandardZombie, BossAlien, StealthSpider,
+	# LizardEmperor -- and the named ones are the bosses, the shooters and the
+	# spawners. Matching only the numbered form covered 69 of 102 and said
+	# nothing about the other 33. The file holds one array and no commented-out
+	# nodes, so every id in it is a live variant.
+	grep -oE '<node id="[A-Za-z_0-9]+"' "$ASSETS/creatures/creature-variants.xml" |
 		sed 's/<node id="//;s/"//' | sort -u
 }
 
@@ -83,13 +103,16 @@ named_scenarios() {
 	# the hand-written ones; the parameterised three are the sweeps themselves
 	for f in "$ROOT"/src/test/scenarios/*.lua; do
 		n="$(basename "$f" .lua)"
-		case "$n" in matrix | bake | mode) ;; *) echo "$n" ;; esac
+		case "$n" in matrix | bake | mode | lethality) ;; *) echo "$n" ;; esac
 	done
 }
 
 jobs_for() {
 	case "$1" in
 	matrix)
+		for skip in $(creature_types_unspawnable); do
+			echo "not in the matrix: $skip has no spawn variant" >&2
+		done
 		for w in $(weapon_slots); do
 			for c in $(creature_types); do
 				echo "matrix-w$w-$c|allweapons|matrix|CL_WEAPON=$w CL_CREATURE=$c"
@@ -108,6 +131,18 @@ jobs_for() {
 			for q in $(seq 1 10); do
 				echo "bake-$ch-$q|vanilla|bake|CL_CHAPTER=$ch CL_QUEST=$q"
 			done
+		done
+		;;
+	variety)
+		for ch in $(seq 1 "$(chapters)"); do
+			echo "variety-$ch|vanilla|bake-variety|CL_CHAPTER=$ch"
+		done
+		;;
+	lethality)
+		# every gun against the first enemy in the game: it has to be able to
+		# kill it, and three of them could not
+		for w in $(weapon_slots); do
+			echo "lethal-w$w|allweapons|lethality|CL_WEAPON=$w"
 		done
 		;;
 	modes)
@@ -133,7 +168,7 @@ jobs_for() {
 
 # ---------------------------------------------------------------- the sweep
 
-[ "$SWEEP" = "all" ] && SWEEPS="named modes bake variants matrix" || SWEEPS="$SWEEP"
+[ "$SWEEP" = "all" ] && SWEEPS="named modes bake variety lethality variants matrix" || SWEEPS="$SWEEP"
 
 test -x "$LOVE" || {
 	echo "LÖVE not found at $LOVE" >&2

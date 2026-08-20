@@ -48,6 +48,13 @@ local function setup()
 	start_clock = play.time
 	play.kills_goal = nil
 	play.no_perks = true
+	-- The AI loots, and a fight that hands it a better gun half way through is
+	-- no longer a measurement of the weapon this run is named after: the first
+	-- pass of the matrix reported nineteen runs for the submachine gun and nine
+	-- for the ion cannon, out of thirteen each, because the numbers followed
+	-- whatever was in hand at the end. The mode flag that turns weapon drops
+	-- off is nukefism's own.
+	play.no_weapon_drops = true
 	play.pool = { { type = CREATURE, w = 1 } }
 	input.set_controller(require("mods.vanilla.game.ai_player").controller())
 	print(("[matrix] weapon=%s creature=%s"):format(
@@ -68,10 +75,13 @@ local function sample()
 end
 
 local function report()
-	print(("[matrix] t=%.1f shots=%d hits=%d kills=%d peak_alive=%d hp=%d/%d drops=%d fx=%d"):format(
-		play.time or -1, play.shots or -1, play.hits or -1, play.kills or -1,
-		peak_alive, play.player and play.player.hp or -1, start_hp,
-		#(play.drops or {}), require("src.engine.fx").count()))
+	-- the pair leads the line: 390 of these are read as a table, and a row
+	-- that does not say what it is has to be traced back to its log
+	print(("[matrix] %-20s %-12s t=%.1f shots=%d hits=%d kills=%d peak=%d hp=%d/%d drops=%d fx=%d"):format(
+		play.player and play.player.weapon and play.player.weapon.id or "NONE",
+		CREATURE, play.time or -1, play.shots or -1, play.hits or -1,
+		play.kills or -1, peak_alive, play.player and play.player.hp or -1,
+		start_hp, #(play.drops or {}), require("src.engine.fx").count()))
 end
 
 -- The fight window: from the setup step to the report, in scenario seconds.

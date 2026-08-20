@@ -24,8 +24,34 @@ local data = require("mods.vanilla.game.data")
 local terrain = {}
 
 -- Terrains with no SetSeeds of their own still have to bake the same way
--- twice; this is the generator they get.
-local DEFAULT_SEED = 12345
+-- twice -- but not the same way as each other, and not the same way for all
+-- ten quests of a chapter.
+--
+-- Only CHAPTER_1 and CHAPTER_2 carry a seed list; chapters 3 to 7 and most of
+-- the endless arrays say nothing, and an op list that never reseeds bakes from
+-- whatever the generator was last left holding. A single constant here answered
+-- that with one field per chapter, for all ten of its quests, on every
+-- playthrough -- five of the seven chapters fought over one unchanging piece of
+-- ground. Chapter 5 shows what was lost: its gates at quests 4, 8 and 10 work,
+-- so it had four grounds where the two seeded chapters have ten.
+--
+-- So the fallback is a function of what is being baked instead of a constant.
+-- It stays a constant per (terrain, quest) -- the bake is still reproducible,
+-- which is what the seed list is for and what the autotest relies on.
+local FALLBACK_SEED = 12345
+
+--- Stable seed for a terrain that never says SetSeeds. djb2 over the id, mixed
+-- with the quest number: any string in, one number out, same answer every run
+-- and on every machine. Arithmetic only -- this is Lua 5.1, where `~` is not
+-- an operator and the bit library would be a dependency for nothing. 2^31
+-- keeps the result inside the range LOVE's generator takes.
+local function fallback_seed(id, quest)
+	local h = 5381
+	for i = 1, #id do
+		h = (h * 33 + id:byte(i)) % 2147483648
+	end
+	return (h + (quest or 0) * 2654435761 + FALLBACK_SEED) % 2147483648
+end
 
 -- Bakes are expensive and a session holds on to its canvas for the whole run,
 -- so only a couple are worth keeping: the one being played and whatever the
@@ -425,7 +451,7 @@ local function clean(chapter_id, quest, w, h, density)
 	run_ops(data.terrains[chapter_id] or data.terrains.CHAPTER_1 or {}, {
 		w = w,
 		h = h,
-		rng = love.math.newRandomGenerator(DEFAULT_SEED),
+		rng = love.math.newRandomGenerator(fallback_seed(chapter_id, quest)),
 		quest = quest,
 		depth = 0,
 	})

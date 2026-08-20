@@ -9,9 +9,10 @@
 #   tools/sweep.sh named         every hand-written scenario in src/test
 #   tools/sweep.sh all           all of the above
 #
-# Second argument is the job count (default 6). Each job is a whole LÖVE
-# process; they are headless and share nothing but the CPU, so the only real
-# ceiling is core count.
+# Second argument is the job count (default 4). Each job is a whole LÖVE
+# process with its own baked terrain canvases and its own copy of the 1080p art
+# it touches, so the ceiling is RAM rather than cores: four at a time is what
+# this machine takes comfortably.
 #
 # The lists are read out of vendor/assets rather than written down here: a
 # sweep that has to be edited when the data changes is a sweep that silently
@@ -29,7 +30,7 @@
 set -uo pipefail
 
 SWEEP="${1:-matrix}"
-JOBS="${2:-6}"
+JOBS="${2:-4}"
 LIMIT="${CL_LIMIT:-180}" # wall-clock seconds one run may take
 LOVE="${LOVE:-$HOME/Applications/love.app/Contents/MacOS/love}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -116,9 +117,14 @@ jobs_for() {
 		;;
 	named)
 		for s in $(named_scenarios); do
-			# allweapons-* are the only ones that need the debug cartridge
-			case "$s" in allweapons-*) echo "named-$s|allweapons|$s|CL_NAMED=1" ;;
-			*) echo "named-$s|vanilla|$s|CL_NAMED=1" ;; esac
+			# a scenario names its cartridge by its prefix: td-* only exist
+			# inside the tower defence mod's screens, allweapons-* need the
+			# picker, and the rest are the base game
+			case "$s" in
+			td-*) echo "named-$s|towerdefence|$s|CL_NAMED=1" ;;
+			allweapons-*) echo "named-$s|allweapons|$s|CL_NAMED=1" ;;
+			*) echo "named-$s|vanilla|$s|CL_NAMED=1" ;;
+			esac
 		done
 		;;
 	*) echo "unknown sweep '$1'" >&2 && exit 2 ;;

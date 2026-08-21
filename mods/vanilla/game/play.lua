@@ -1962,6 +1962,15 @@ local function update_bullets(game, dt)
 							explode(game, b.x, b.y, b.damage, b.art, b.explosive)
 							dead = true
 						else
+							-- A cartridge's own round at the moment it connects.
+							-- Before the hit and not after, because what a verb
+							-- like "damage scales with how far this travelled"
+							-- changes is `b.damage`, and afterwards is too
+							-- late. Returning false stops the round here
+							-- whatever its pierce count says -- what a round
+							-- that turns into something else on impact needs.
+							local stop = tr and tr.on_hit
+								and tr.on_hit(game, b, c) == false
 							hit_creature(game, b, c)
 							apply_on_hit(game, b, c)
 							-- pierce: through this many bodies before stopping.
@@ -1970,7 +1979,9 @@ local function update_bullets(game, dt)
 							b.hit = b.hit or {}
 							b.hit[c] = true
 							b.pierced = (b.pierced or 0) + 1
-							if b.pierced > (tr and tr.pierce or 0) then dead = true end
+							if stop or b.pierced > (tr and tr.pierce or 0) then
+								dead = true
+							end
 						end
 						if dead then break end
 					end
@@ -1979,6 +1990,10 @@ local function update_bullets(game, dt)
 		end
 
 		if dead then
+			-- ...and where it stopped, whether that was a body, the wall or
+			-- the end of its reach. A round that leaves something behind it --
+			-- a pool, a mark, a charge -- puts it here.
+			if tr and tr.on_end then tr.on_end(game, b) end
 			split_bullet(game, b)
 			table.remove(game.bullets, i)
 		end

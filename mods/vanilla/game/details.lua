@@ -1,10 +1,11 @@
--- The weapon detail screen (ui/weapon-details.lua).
+-- The weapon and perk detail screens (ui/weapon-details.lua, ui/perk-details.lua).
 --
--- It ships fully laid out and nothing in the pak or this port could push it:
--- the gallery answered a click with nothing and put what it had to say in a
--- hover tooltip instead. A tooltip is 380 pixels wide and holds one line;
--- weapon-details holds the name, the ammo cell's own icon, the clip size and
--- four bars.
+-- Both ship fully laid out and nothing in the pak or this port could push
+-- either: the galleries answered a click with nothing and put what they had to
+-- say in a hover tooltip instead. A tooltip is 380 pixels wide and holds one
+-- line; weapon-details holds the name, the ammo cell's own icon, the clip size
+-- and four bars, and perk-details holds the whole description at reading size
+-- beside the perk's own plate-sized icon.
 --
 -- The tooltip stays. It is the thing you read while sweeping the grid, and this
 -- is the thing you open when one of them interests you.
@@ -19,10 +20,14 @@
 --   weapon-details.lua:99  slider_fire_rate    stat_fire_rate where authored
 --   weapon-details.lua:105 slider_reload_time  derived, see RATE below
 --
--- Nothing else on the layout carries data: text_ptype ("Ammo"),
+--   perk-details.lua:14    PerkName            perk.name
+--   perk-details.lua:26    PerkDesc            perk.desc
+--   perk-details.lua:36    PerkIcon            perk.icon_large
+--
+-- Nothing else on either layout carries data: text_ptype ("Ammo"),
 -- text_accuracy, text_damage, text_fire_rate, text_fire_rate2 ("Reload TIme",
--- the original's own typo) and text_clip_size are static labels, and fader,
--- panel and grid are furniture.
+-- the original's own typo) and text_clip_size are static labels, fader, panel
+-- and grid are furniture, and perk-details' Back button is the engine's.
 --
 -- Not filled, because the data cannot: weapons.xml's `projectile_type` is on
 -- two weapons (PLASMA_OVERLOAD and MEGALASER, both creature guns) and this
@@ -104,15 +109,29 @@ end
 -- engine's push() takes it for -- the same way the unlock celebrations carry
 -- which plate to point at.
 function details.prepare(screen_name, screen)
-	if screen_name ~= "WeaponDetails" then return end
 	local index = tonumber(screen.parm)
-	local w = index and gallery.entry_at("weapon", index)
-	if not w then return end
-	put(screen, "WeaponName", "textbox.text", w.name)
-	put(screen, "ClipSize", "textbox.text", tostring(w.clip_size))
-	put(screen, "ammo_type", "image.bitmap", w.ammo_icon)
-	for comp_name, value in pairs(details.bars(w)) do
-		put(screen, comp_name, "slider.value", value)
+	if not index then return end
+
+	if screen_name == "WeaponDetails" then
+		local w = gallery.entry_at("weapon", index)
+		if not w then return end
+		put(screen, "WeaponName", "textbox.text", w.name)
+		put(screen, "ClipSize", "textbox.text", tostring(w.clip_size))
+		put(screen, "ammo_type", "image.bitmap", w.ammo_icon)
+		for comp_name, value in pairs(details.bars(w)) do
+			put(screen, comp_name, "slider.value", value)
+		end
+	elseif screen_name == "PerkDetails" then
+		local p = gallery.entry_at("perk", index)
+		if not p then return end
+		put(screen, "PerkName", "textbox.text", p.name)
+		-- A perk this port cannot serve says so here too, the way its plate
+		-- and its tooltip already do (game/gallery.lua). The description is
+		-- still the original's; what is added is that it does not work.
+		local desc = p.desc
+		if p.unimplemented then desc = desc .. "  (" .. p.unimplemented .. ")" end
+		put(screen, "PerkDesc", "textbox.text", desc)
+		put(screen, "PerkIcon", "image.bitmap", p.icon_large)
 	end
 end
 

@@ -3261,6 +3261,16 @@ function game.on_ui_click(screen_name, comp_name)
 			require("src.engine.screens").push("WeaponDetails", tonumber(slot))
 			return true
 		end
+	elseif screen_name == "Perks" then
+		-- and the same for the perk grid: ui/perk-details.lua holds the whole
+		-- description at reading size beside the perk's plate-sized icon
+		local gallery = require("mods.vanilla.game.gallery")
+		local slot = comp_name:match("^Perk_(%d+)$")
+		local entry = slot and gallery.entry_at("perk", tonumber(slot))
+		if entry and entry.icon and gallery.seen("perk", entry) then
+			require("src.engine.screens").push("PerkDetails", tonumber(slot))
+			return true
+		end
 	end
 	return false
 end

@@ -296,6 +296,11 @@ local function build()
 			name = entry.name,
 			desc = entry.desc,
 			icon = ("perks/perk_%02d.png"):format(index),
+			-- The same perk at plate size. perks/large/ ships 60 of these and
+			-- nothing drew any of them: the grids want the small icon, and the
+			-- one screen built around the large one is ui/perk-details.lua,
+			-- which nothing could push (game/details.lua).
+			icon_large = ("perks/large/perk_%02d.png"):format(index),
 			apply = EFFECTS[index],
 			unimplemented = NOT_HERE[index],
 			requires = REQUIRES[index],

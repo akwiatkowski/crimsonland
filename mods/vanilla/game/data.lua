@@ -326,6 +326,32 @@ function data.load_terrains()
 			data.terrains[arr.id] = ops
 		end
 	end
+	loaded.terrains = true
+end
+
+-- ------------------------------------------------------------ demos
+
+-- The authored scenes an attract mode plays: demos.xml gives each one a
+-- terrain, a duration, a spawn set and a position and weapon for every trooper
+-- in it. MENU_COMBAT_1..5 are the menu backdrop; the TRIAL_* nodes belong to a
+-- trial build's upsell screens and have no home here.
+data.demos = {} -- id -> attrs
+data.menu_demos = {} -- MENU_COMBAT_* in file order
+
+function data.load_demos()
+	if loaded.demos then return end
+	local root = read_xml("demos.xml")
+	local arr = root and xml.array(root, "DEMOS")
+	for _, node in ipairs(arr and arr.children or {}) do
+		local a = node.attrs
+		if a.id then
+			data.demos[a.id] = a
+			if a.id:match("^MENU_COMBAT") then
+				data.menu_demos[#data.menu_demos + 1] = a
+			end
+		end
+	end
+	loaded.demos = true
 end
 
 -- ------------------------------------------------------------ chapters
@@ -345,6 +371,7 @@ function data.load_all()
 	data.load_creatures()
 	data.load_variants()
 	data.load_terrains()
+	data.load_demos()
 	data.load_chapters()
 end
 

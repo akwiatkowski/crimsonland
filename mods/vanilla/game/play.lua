@@ -215,6 +215,11 @@ local function init_session(mode, chapter, quest, terrain_override)
 	if game.terrain then game.terrain:release() end
 	game.terrain = bake_terrain(terrain_override or terrain_for(mode, chapter), quest)
 
+	-- Whatever attract scene was up belongs to that scene. start_demo sets
+	-- these again after this returns; a real run must not inherit a demo's
+	-- creature set or its countdown.
+	game.demo_id, game.demo_left, game.demo_pool = nil, nil, nil
+
 	game.player = {
 		x = WORLD_W / 2,
 		y = WORLD_H / 2,
@@ -370,24 +375,76 @@ local SURVIVAL_WAVES = {
 -- Attract mode: the original's timeline says the menu backdrop IS the game
 -- ("MainMenu" pushes GameCrimsonland with parm_demo="MENU_COMBAT_1..5"), so
 -- the menu sits over a session an AI is playing rather than over a still.
+--- Which MENU_COMBAT scene comes next. The five are a rotation rather than a
+-- roll: the original names them in order and each is a different picture, so
+-- cycling shows all five where random repeats and skips.
+local demo_next = 0
+
+-- The spawn sets demos.xml names are not defined anywhere in the pak -- the
+-- C++ side held them -- but the creature is legible from the name, which is
+-- the half worth honouring. What the suffix meant (AROUND, BELOW, RANDOM) was
+-- a placement pattern and is not recoverable, so the ring spawn stands in.
+local DEMO_SPAWNS = {
+	ALIENS = "ALIEN",
+	LIZARDS = "LIZARD",
+	ZOMBIES = "ZOMBIE",
+	SPIDERS = "SPIDER1",
+	DENS = "DEN_ALIEN",
+	BOSS = "SPIDER_BOSS",
+}
+
+local function demo_pool(spawns)
+	local head = tostring(spawns or ""):match("^([A-Z]+)")
+	local ctype = head and DEMO_SPAWNS[head]
+	if not ctype then return nil end
+	return { { type = ctype, w = 1 } }
+end
+
 function game.start_demo()
-	-- The backdrop is a chapter of the real game, not the survival field, and
-	-- the chapter has to be picked before the session starts: baking survival's
+	data.load_all()
+	-- The five scenes 10tons authored for this: demos.xml gives each a terrain,
+	-- a duration, a spawn set, and a position and weapon for its trooper. The
+	-- port used to roll a chapter and a gun instead, which was a different
+	-- picture every time and none of the intended ones.
+	local demo = data.menu_demos[demo_next % math.max(1, #data.menu_demos) + 1]
+	demo_next = demo_next + 1
+
+	-- The terrain has to be chosen before the session starts: baking survival's
 	-- ground first and throwing it away cost a full bake on every restart, and
 	-- the attract mode restarts every time its AI dies.
-	local chapter = love.math.random(1, NUM_CHAPTERS)
-	game.start_survival("survival", true, "CHAPTER_" .. chapter)
-	game.chapter = chapter
+	local terrain = demo and demo.terrain_id or
+		("CHAPTER_" .. love.math.random(1, NUM_CHAPTERS))
+	game.start_survival("survival", true, terrain)
+	game.chapter = tonumber(terrain:match("CHAPTER_(%d+)")) or 1
 	game.no_perks = true -- nothing may interrupt with a UI screen
 	game.spawn_interval = 1.2
 	game.max_concurrent = 10
-	-- attract mode should look like someone playing well, and the starting
-	-- pistol caps out at 1.4 shots/s; each demo draws a different gun, which
-	-- is also what the original's five MENU_COMBAT setups were for
-	local w = data.weapon_order[love.math.random(2, 12)]
+
+	-- how long this scene runs before the next one, per the node's own duration
+	game.demo_id = demo and demo.id or nil
+	game.demo_left = demo and tonumber(demo.duration) or nil
+
+	-- The scene's own creatures, held apart from game.pool because the survival
+	-- ramp rebuilds that from the clock on every frame and would have replaced
+	-- them before the first one spawned.
+	game.demo_pool = demo and demo_pool(demo.spawns)
+	if game.demo_pool then game.pool = game.demo_pool end
+
+	-- MENU_COMBAT_3 authors no trooper at all, so the starting pistol stands --
+	-- and the survival ramp will hand it something better soon enough.
+	local w = demo and demo.trooper_1_weapon and data.weapons[demo.trooper_1_weapon]
 	if w then
 		game.player.weapon = w
 		game.player.ammo = w.clip_size
+	end
+	local px, py = tostring(demo and demo.trooper_1_position or ""):match("^(%d+),(%d+)$")
+	if px then
+		game.player.x = math.max(32, math.min(WORLD_W - 32, tonumber(px)))
+		game.player.y = math.max(32, math.min(WORLD_H - 32, tonumber(py)))
+	end
+	if demo then
+		print(("[demo] %s on %s, %s, %ss"):format(demo.id, terrain,
+			tostring(demo.trooper_1_weapon or "pistol"), tostring(demo.duration)))
 	end
 	input.set_controller(ai_player.controller())
 	-- gunfire belongs under the menu music, not over it; ducking is separate
@@ -470,7 +527,10 @@ local function update_survival_ramp(game)
 			end
 		end
 	end
-	game.pool = pool
+	-- An attract scene names its own creatures (demos.xml `spawns`), and this
+	-- runs every frame: without the guard the authored set would be replaced
+	-- before the first of them spawned.
+	if not game.demo_pool then game.pool = pool end
 end
 
 -- rush: an accelerating wall of aliens, nothing else
@@ -2063,6 +2123,18 @@ function game.update(dt)
 	if game.demo and game.outcome then
 		game.start_demo()
 		return
+	end
+
+	-- ...and a scene that has had its authored run moves on to the next of the
+	-- five. demos.xml gives each a duration -- 7 to 12 seconds -- which is what
+	-- makes the backdrop a rotation of five pictures rather than one fight held
+	-- until its AI dies.
+	if game.demo and game.demo_left then
+		game.demo_left = game.demo_left - dt
+		if game.demo_left <= 0 then
+			game.start_demo()
+			return
+		end
 	end
 
 	if game.outcome then

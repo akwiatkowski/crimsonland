@@ -11,8 +11,10 @@
 -- its color_ spelling, DrawVoronoi, DrawSingle, FootPrints, DrawTerrain --
 -- and the [terrain] lines in the log carry what each bake cost.
 --
--- Waves and Nukefism would cover DrawTerrain too but are progression-locked
--- on a fresh save, so a click lands on an inactive button and does nothing.
+-- Waves and Nukefism would cover DrawTerrain too. Nukefism is a click away and
+-- always was; Waves used not to be, and not for progression -- its button is
+-- gated on required_features="ADDITIONAL_CONTENT_JUNE_2015" and the port
+-- declared that feature absent, so the button was hidden rather than inactive.
 -- The third leg is quest 1-1 instead, which is the other half of the tier:
 -- SetSeeds picking that quest's layout, and quest_number_required holding
 -- back the debris and blast marks a first quest has not earned yet.

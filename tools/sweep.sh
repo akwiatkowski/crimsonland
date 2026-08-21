@@ -7,7 +7,8 @@
 #   tools/sweep.sh bake          7 chapters x 10 quests of ground (70)
 #   tools/sweep.sh variety       each chapter's ten grounds, compared (7)
 #   tools/sweep.sh lethality     every weapon against the first enemy (30)
-#   tools/sweep.sh modes         the six endless modes (6)
+#   tools/sweep.sh modes         the six endless modes, each rule (6)
+#   tools/sweep.sh modemenu      the six endless modes, reached by clicking (6)
 #   tools/sweep.sh named         every hand-written scenario in src/test
 #   tools/sweep.sh all           all of the above
 #
@@ -103,7 +104,7 @@ named_scenarios() {
 	# the hand-written ones; the parameterised three are the sweeps themselves
 	for f in "$ROOT"/src/test/scenarios/*.lua; do
 		n="$(basename "$f" .lua)"
-		case "$n" in matrix | bake | mode | lethality) ;; *) echo "$n" ;; esac
+		case "$n" in matrix | bake | mode | mode-menu | lethality) ;; *) echo "$n" ;; esac
 	done
 }
 
@@ -150,6 +151,13 @@ jobs_for() {
 			echo "mode-$m|vanilla|mode|CL_MODE=$m"
 		done
 		;;
+	modemenu)
+		# the same six, but selected off the survival menu rather than started
+		# by the call behind it -- Waves had no visible button at all
+		for m in SURVIVAL RUSH BLITZ WAVES NUKEFISM WEAPONPICKER; do
+			echo "modemenu-$m|vanilla|mode-menu|CL_MODE=$m"
+		done
+		;;
 	named)
 		for s in $(named_scenarios); do
 			# a scenario names its cartridge by its prefix: td-* only exist
@@ -168,7 +176,7 @@ jobs_for() {
 
 # ---------------------------------------------------------------- the sweep
 
-[ "$SWEEP" = "all" ] && SWEEPS="named modes bake variety lethality variants matrix" || SWEEPS="$SWEEP"
+[ "$SWEEP" = "all" ] && SWEEPS="named modes modemenu bake variety lethality variants matrix" || SWEEPS="$SWEEP"
 
 test -x "$LOVE" || {
 	echo "LÖVE not found at $LOVE" >&2

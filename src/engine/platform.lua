@@ -22,9 +22,19 @@ local FEATURES = {
 	SINGLE_PROFILE = true, -- one local profile; no profile picker
 	NO_COOP = true, -- no second trooper, so co-op controls stay hidden
 	HIDE_HIGHSCORES_FILTER_BUTTON = true, -- local scores only: nothing to filter
+	-- The June 2015 content pack, which this copy has and this port implements:
+	-- the pak ships chapter 7 "Phoenix Calling" and Waves mode, and both are
+	-- built here. Two places gate on it -- chapters.xml:14 on CHAPTER_7, and
+	-- ui/play-menu-survival.lua on the Play_WAVES button -- and with the
+	-- feature absent the port answered them differently: it never reads the
+	-- chapter gate, so chapter 7 was playable, while the layout's own gate hid
+	-- the Waves button, so a mode with a full implementation behind it
+	-- (update_waves_mode) could not be chosen. Granting the feature answers
+	-- both the same way, through the original's own mechanism.
+	ADDITIONAL_CONTENT_JUNE_2015 = true,
 	-- explicitly absent: ADS, MOREGAMES, ANNOUNCEMENTS, ACCOUNT_MANAGEMENT,
 	-- VIRTUAL_CONTROLS, EXTERNAL_HELP, TROPHIES, AUTOMATIC_PROFILE_NAMING,
-	-- NO_FORCE_FEEDBACK, ADDITIONAL_CONTENT_JUNE_2015, DEVELOPER_MODE,
+	-- NO_FORCE_FEEDBACK, DEVELOPER_MODE,
 	-- RESTORE_PURCHASES_BUTTON, GAME_CENTER, GOOGLE_PLAY_GAMES,
 	-- PS4_CONTROLS, PS_VITA_CONTROLS, LEADERBOARDS_SELECTOR,
 	-- SHOW_SEPARATE_GLOBAL_HIGHSCORES, HIGHSCORES_DETAILS_BUTTON,

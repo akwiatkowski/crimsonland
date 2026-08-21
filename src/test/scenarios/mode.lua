@@ -9,10 +9,12 @@
 -- true -- so each mode asserts its own here, rather than every mode asserting
 -- that a run started.
 --
--- Started through game.start_survival, the call the menu button makes: Waves
--- and Nukefism are progression-locked on a fresh profile, so clicking them on
--- the survival screen does nothing at all (terrain-smoke says so too), and the
--- allweapons cartridge cannot be the way around it here -- its picker would
+-- Started through game.start_survival, the call the menu button makes, so that
+-- a mode's rule can be checked without depending on the menu being able to
+-- reach it. Whether the menu can is mode-menu.lua's question -- and for Waves
+-- the answer used to be no.
+--
+-- The allweapons cartridge cannot be the way in here either: its picker would
 -- put a weapon in the hands of the mode whose whole rule is not having one.
 
 local input = require("mods.vanilla.game.input")

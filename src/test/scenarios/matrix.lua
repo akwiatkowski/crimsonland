@@ -100,6 +100,20 @@ return {
 	{ t = 10.0, run = setup },
 	{ t = 10.1, expect = function()
 		local want = data.weapon_order[SLOT]
+		-- The attract demo behind the menu is itself a live session, so
+		-- play.active is true before anything is clicked and every number below
+		-- would be the demo's. One run in 360 came up with an ExitConfirmation
+		-- dialog on top -- EXIT_DIALOG_ON_ESC is on and the menu script pushes
+		-- it, so a stray Escape reaching a hidden window is enough -- and every
+		-- click bounced off it. What that reported was the demo: a weapon this
+		-- scenario never picked, fighting creatures it never chose, with the
+		-- clock frozen where the menu left it. Three assertions failed and none
+		-- of them said so.
+		if play.demo then
+			return false, ("nothing was clicked: the attract demo is still running (top screen %s)")
+				:format(require("src.engine.screens").top() and
+					require("src.engine.screens").top().name or "?")
+		end
 		local got = play.active and play.player and play.player.weapon
 		if not got then return false, "no run started for weapon slot " .. SLOT end
 		if not (want and got.id == want.id) then

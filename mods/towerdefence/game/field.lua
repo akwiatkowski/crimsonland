@@ -550,9 +550,87 @@ end
 
 -- ---------------------------------------------------------------- bullets
 
+-- What colour a blast burns, on vanilla's own reading of it: the fireball art
+-- is painted for ordnance, so a rocket takes it as it is and only the energy
+-- families tint it towards their own bolt (mods/vanilla/game/play.lua).
+local BLAST_TINT = {
+	plasma = data.FAMILY_COLOR.plasma,
+	ion = data.FAMILY_COLOR.ion,
+	pulse = data.FAMILY_COLOR.pulse,
+}
+
+-- How far a seeker looks for something to steer at. Beyond this it flies
+-- straight, so a rocket fired at nothing does not curl around the field.
+-- Vanilla's number, because a seeker has to seek the same way in both.
+local HOMING_SIGHT = 420
+
+local function nearest_creature(x, y, range)
+	local best, bestd
+	for _, c in ipairs(field.creatures) do
+		if not c.dying then
+			local dx, dy = c.x - x, c.y - y
+			local d = dx * dx + dy * dy
+			if d < range * range and (not bestd or d < bestd) then best, bestd = c, d end
+		end
+	end
+	return best
+end
+
+--- Steer a round toward the nearest creature at its own turn rate. A rate
+-- rather than a snap: the point of a seeker is that it corrects, not that it
+-- cannot be beaten -- a rocket that turned instantly would make the whole
+-- perimeter one mount wide.
+local function steer_homing(b, dt)
+	local target = nearest_creature(b.x, b.y, HOMING_SIGHT)
+	if not target then return end
+	local want = math.atan2(target.y - b.y, target.x - b.x)
+	local cur = math.atan2(b.dy, b.dx)
+	local diff = ((want - cur + math.pi) % (2 * math.pi)) - math.pi
+	local turn = math.rad(b.traits.homing) * dt
+	local a = cur + math.max(-turn, math.min(turn, diff))
+	b.dx, b.dy = math.cos(a), math.sin(a)
+end
+
+--- Ordnance going off: area damage with linear falloff to the edge, on the
+-- round's own numbers (mods/vanilla/game/traits.lua). No screen shake or haze
+-- here -- this mod's camera has neither -- but the damage and the fireball are
+-- vanilla's, because a rocket has to be worth the same money in both.
+local function explode(b)
+	local blast = b.blast
+	local radius = blast.radius or 80
+	particles.explosion(b.x, b.y, radius, b.art and BLAST_TINT[b.art])
+	audio.play_sound("sfx/explosion_medium")
+	for _, c in ipairs(field.creatures) do
+		if not c.dying then
+			local ddx, ddy = c.x - b.x, c.y - b.y
+			local dist = math.sqrt(ddx * ddx + ddy * ddy)
+			local reach = radius + 16 * c.scale
+			if dist < reach then
+				local falloff = 1 - 0.7 * (dist / reach)
+				local dmg = b.damage * (blast.damage or 2) * falloff
+				-- thrown away from the blast rather than along a round's line:
+				-- an explosion has no direction of its own, only an outside
+				gibs.push(c, ddx / math.max(dist, 1e-6), ddy / math.max(dist, 1e-6),
+					dmg * gibs.BLAST_SPEED)
+				if damage_creature(c, dmg) and b.owner then
+					-- a mount is paid for what it kills, and a warhead kills
+					-- most of what it kills without ever touching it
+					b.owner.kills = (b.owner.kills or 0) + 1
+				end
+			end
+		end
+	end
+end
+
 local function update_bullets(dt)
 	for i = #field.bullets, 1, -1 do
 		local b = field.bullets[i]
+		-- a rocket is under power: it leaves the tube slow and builds to the
+		-- speed the weapon table gives it
+		if b.accel then
+			b.speed = math.min(b.max_speed, b.speed + b.accel * dt)
+		end
+		if b.traits and b.traits.homing then steer_homing(b, dt) end
 		local step = b.speed * dt
 		b.x = b.x + b.dx * step
 		b.y = b.y + b.dy * step
@@ -560,24 +638,40 @@ local function update_bullets(dt)
 		local dead = b.dist_left <= 0
 			or b.x < 0 or b.x > WORLD_W or b.y < 0 or b.y > WORLD_H
 
+		-- ordnance that runs out of range goes off where it fell rather than
+		-- fizzling, which is what makes a rocket a poor answer to something at
+		-- the very edge of a mount's reach
+		if dead and b.blast then explode(b) end
+
 		if not dead then
 			for _, c in ipairs(field.creatures) do
 				if not c.dying then
 					local r = 16 * c.scale + 6
 					local ddx, ddy = c.x - b.x, c.y - b.y
 					if ddx * ddx + ddy * ddy < r * r then
-						local dir = math.atan2(b.dy, b.dx)
-						local power = particles.power(b.damage)
-						-- Poison Bullets: what the round leaves behind in it,
-						-- refreshed by every further hit
-						if field.mods.poison > 0 then c.poison_t = 4 end
-						particles.impact(b.art or "bullet", b.weapon_id,
-							b.x, b.y, dir, power)
-						if damage_creature(c, b.damage) then
+						if b.blast then
+							-- the warhead is the damage, all of it at once and
+							-- to everything close: the round itself does not
+							-- also punch a hole in what it touched
+							explode(b)
+						else
+							local dir = math.atan2(b.dy, b.dx)
+							local power = particles.power(b.damage)
+							-- Poison Bullets: what the round leaves behind in
+							-- it, refreshed by every further hit
+							if field.mods.poison > 0 then c.poison_t = 4 end
+							-- and what every round leaves behind: the shove,
+							-- so that if this one kills, the parts go the way
+							-- it was going
+							gibs.push(c, b.dx, b.dy, b.damage * b.speed)
 							particles.impact(b.art or "bullet", b.weapon_id,
-								b.x, b.y, dir, power * 1.5)
-							if b.owner then
-								b.owner.kills = (b.owner.kills or 0) + 1
+								b.x, b.y, dir, power)
+							if damage_creature(c, b.damage) then
+								particles.impact(b.art or "bullet", b.weapon_id,
+									b.x, b.y, dir, power * 1.5)
+								if b.owner then
+									b.owner.kills = (b.owner.kills or 0) + 1
+								end
 							end
 						end
 						dead = true
@@ -683,6 +777,14 @@ local function update_creatures(dt)
 			-- base is seventy pixels of wall
 			local reach = (what == "base") and BASE_RADIUS or (16 * c.scale + 14)
 
+			-- Where it was before it moved. The mounts lead their shots with
+			-- what comes out of this (game/plots.lua), and it is measured
+			-- rather than intended on purpose: every branch below is a
+			-- different kind of moving -- walking in, wandering, standing at a
+			-- nest, holding a firing distance -- and re-deriving each one from
+			-- the outside is how the aim and the walk drift apart.
+			local was_x, was_y = c.x, c.y
+
 			if c.spawn_cd or v.ai == "IDLE" then
 				-- nests stand where they landed
 			elseif v.ai == "WANDERER" then
@@ -696,6 +798,9 @@ local function update_creatures(dt)
 			elseif dist > reach and not (c.fire_cd and dist < SHOOTER_STANDOFF) then
 				c.x = c.x + dx / dist * speed * dt
 				c.y = c.y + dy / dist * speed * dt
+			end
+			if dt > 0 then
+				c.vx, c.vy = (c.x - was_x) / dt, (c.y - was_y) / dt
 			end
 
 			if c.fire_cd and dist < SHOOTER_RANGE then
@@ -949,8 +1054,11 @@ local function draw_shadow(def, x, y, scale)
 	love.graphics.setColor(1, 1, 1, 1)
 end
 
+local BULLET_TRAIL_W = 3 -- a tracer is a line whatever is drawing it
+
 local function draw_bullets()
 	local bullet_img = assets.image("game/bullet16.tga")
+	local trail_img = assets.image("game/bulletTrail.tga")
 	for _, b in ipairs(field.bullets) do
 		local rot = math.atan2(b.dy, b.dx)
 		if b.art == "plasma" or b.art == "ion" then
@@ -967,6 +1075,20 @@ local function draw_bullets()
 				love.graphics.setColor(1, 1, 1, 1)
 			end
 		elseif bullet_img then
+			-- kinetic: the smear the round's own speed earns it, drawn from the
+			-- sprite's right edge so it lies behind the round along the way it
+			-- came. It is what tells a mount holding a Gauss Gun from one
+			-- holding a rifle at a glance -- a ray across the field against a
+			-- dotted line of tracers (mods/vanilla/game/data.lua).
+			if trail_img then
+				local len, tr, tg, tb, ta = data.tracer(b.speed)
+				love.graphics.setBlendMode("add")
+				love.graphics.setColor(tr, tg, tb, ta)
+				love.graphics.draw(trail_img, b.x, b.y, rot,
+					len / trail_img:getWidth(), BULLET_TRAIL_W / trail_img:getHeight(),
+					trail_img:getWidth(), trail_img:getHeight() / 2)
+				love.graphics.setBlendMode("alpha")
+			end
 			love.graphics.setColor(1, 1, 1, 1)
 			love.graphics.draw(bullet_img, b.x, b.y, rot + math.pi / 2, 0.6, 0.6,
 				bullet_img:getWidth() / 2, bullet_img:getHeight() / 2)
@@ -1047,6 +1169,9 @@ function field.draw()
 	love.graphics.setColor(1, 1, 1, 1)
 
 	draw_bullets()
+	-- over the world, under the fire: where the mounts are sending their next
+	-- rounds is instrumentation, not furniture like the mounts themselves
+	plots.draw_aims(field)
 	fx.draw("world")
 	love.graphics.pop()
 

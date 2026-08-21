@@ -13,6 +13,11 @@
 --   pierce   = N     passes through N bodies before stopping
 --   ricochet = N     bounces off the playfield edge N times
 --   homing   = deg/s steers toward the nearest creature at this turn rate
+--   accel    = {from, rate}  leaves the barrel at `from` of the weapon's rated
+--                            speed and gains `rate` px/s^2 up to it
+--   blast    = {radius, damage}  detonates where it stops: everything within
+--                            `radius` takes `damage` times the round's own,
+--                            falling off with distance
 --   split    = {n, spread}  breaks into n children when it stops
 --   chain    = {jumps, range, decay}  arcs on to further creatures
 --   slow     = {factor, seconds}      what it hits moves slower
@@ -25,14 +30,37 @@
 -- Nothing here invents a weapon. Every entry is a name in the original's own
 -- data finally doing what it says.
 
+-- What every rocket in the arsenal shares, and what tells one from a bullet.
+--
+-- A rocket has a motor: it leaves the tube well below its rated speed and
+-- builds up to it, which is why a launch is something you can watch and why
+-- standing close to a rocket mount is different from standing close to a
+-- rifle. `from` is a fraction of the weapon's own projectile_speed and `rate`
+-- is picked so the round reaches that speed in about a third of a second --
+-- long enough to read as a launch, short enough that the range in weapons.xml
+-- is still the distance the round covers.
+local ROCKET_ACCEL = { from = 0.35, rate = 1300 }
+
+-- Ordnance goes off where it stops instead of punching one hole. Radius in
+-- world pixels, damage as a multiple of the round's own, linear falloff to the
+-- edge -- the numbers the port has always detonated with, now written where
+-- both the weapon table and the code can see them.
+local BLAST_MEDIUM = { radius = 80, damage = 2 }
+
 return {
 	-- The four whose names were already promises ------------------------
 
 	-- "Seeker" rockets that fly straight are the clearest example of the
 	-- problem. Slow turn: they should correct toward a target, not track it
-	-- like a wire-guided missile, or dodging stops mattering.
-	SEEKER_ROCKETS = { homing = 150 },
-	MINI_ROCKET_SWARMERS = { homing = 110 },
+	-- like a wire-guided missile, or dodging stops mattering. With the motor
+	-- and the warhead they are finally the whole word: a rocket that lights,
+	-- chases and goes off.
+	SEEKER_ROCKETS = { homing = 150, accel = ROCKET_ACCEL, blast = BLAST_MEDIUM },
+	MINI_ROCKET_SWARMERS = { homing = 110, accel = ROCKET_ACCEL, blast = BLAST_MEDIUM },
+
+	-- The rockets that never claimed to steer still light and still detonate.
+	ROCKET_LAUNCHER = { accel = ROCKET_ACCEL, blast = BLAST_MEDIUM },
+	ROCKET_MINIGUN = { accel = ROCKET_ACCEL, blast = BLAST_MEDIUM },
 
 	-- A splitter that does not split. Children carry the parent's family and
 	-- a share of its damage, so splitting is reach rather than free damage.
@@ -58,8 +86,9 @@ return {
 
 	-- The pulse gun fires a shockwave front (its own family in weapons.xml,
 	-- and the sprite on projs.tga is a wave). A wave does not stop at the
-	-- first body.
-	PULSE_GUN = { pierce = 2 },
+	-- first body, and it breaks where it lands -- the port has always
+	-- detonated this one alongside the rockets.
+	PULSE_GUN = { pierce = 2, blast = BLAST_MEDIUM },
 
 	-- Ion weapons arc. The original's ion chain was cut from the effects
 	-- round for depicting a rule the game lacked -- this is that rule.

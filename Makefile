@@ -1,6 +1,8 @@
 # Crimsonland macOS port — build & run automation.
 #
 # `make run`      — launch the game with LÖVE (interactive play)
+# `make allweapons`   / `make towerdefence`   — launch that mod directly
+
 # `make test`     — autotest: scripted input + ASCII captures to the terminal
 #                   (SCENARIO=<name> picks a src/test/scenarios/ file;
 #                    MOD=<name> picks the cartridge, as with `make run`)
@@ -17,12 +19,16 @@ PAKS     := $(APP_DIR)/data.pak $(APP_DIR)/data-1080p.pak \
             $(APP_DIR)/data-music-OGG_44100.pak $(APP_DIR)/data-sfx-OGG_44100.pak
 STAMP    := $(VENDOR)/.extracted
 
-.PHONY: run test extract clean check-love
+.PHONY: run test extract clean check-love allweapons towerdefence
 
 MOD ?= vanilla
 
 run: check-love
 	$(LOVE) . --mod=$(MOD)
+
+# Shortcuts for the shipped cartridges — same as `make run MOD=<name>`.
+allweapons towerdefence: check-love
+	$(LOVE) . --mod=$@
 
 SCENARIO ?= quest-smoke
 

@@ -91,11 +91,10 @@ local function progression_muls(chapter, quest, diff_mul)
 		DAMAGE_SCALE_BASE * ramp * diff_mul
 end
 
--- weapon behavior classes (the XML flags don't encode these cleanly)
-local EXPLOSIVE = {
-	ROCKET_LAUNCHER = true, SEEKER_ROCKETS = true, MINI_ROCKET_SWARMERS = true,
-	ROCKET_MINIGUN = true, PULSE_GUN = true,
-}
+-- weapon behavior classes (the XML flags don't encode these cleanly).
+-- Which rounds detonate is not one of these any more: it is the `blast` trait,
+-- read off the weapon itself (game/traits.lua), so the list of ordnance and
+-- the size of the bang live in one place instead of two.
 local FLAME = { FLAMETHROWER = true, BLOW_TORCH = true, HR_FLAMER = true }
 
 -- Two perks name a weapon class rather than a stat: Pyromaniac buffs "fire and
@@ -207,7 +206,7 @@ end
 -- by the caller because terrain_for reads data.terrains, which the load below
 -- is what fills.
 local function init_session(mode, chapter, quest, terrain_override)
-	data.load_all() -- idempotent-ish (cheap enough)
+	data.load_all() -- parses once, then returns immediately
 	-- The outgoing session's ground is a texture of its own, tens of megabytes
 	-- of it, and nothing else holds a reference: the attract mode starts a new
 	-- session every time its AI dies, so waiting for the collector piles them
@@ -943,6 +942,12 @@ local function update_player(game, dt)
 			local reflex_dmg = game.effects.REFLEX_BOOST and game.mods.reflex_dmg or 1
 			-- Living Fortress: "you do more damage ... the longer you stand still"
 			local stand_dmg = 1 + game.mods.stand_ramp * ((p.still_t or 0) / RAMP_FULL)
+			-- Barrel Greaser: "more speed, more damage". A round with a motor
+			-- leaves the barrel below that and builds up to it, so a rocket
+			-- launch is something you watch happen (game/traits.lua).
+			local rated = w.projectile_speed * BULLET_SPEED_SCALE * game.mods.bullet_speed
+			local accel = w.traits and w.traits.accel
+			local launch = accel and rated * accel.from or rated
 			for _ = 1, w.num_projectiles do
 				-- somewhere in the cone this gun's accuracy rating earns it
 				-- (game/data.lua), which for a pellet gun is where the fan
@@ -953,13 +958,14 @@ local function update_player(game, dt)
 					y = p.y + math.sin(p.angle) * 20,
 					dx = math.cos(a),
 					dy = math.sin(a),
-					-- Barrel Greaser: "more speed, more damage"
-					speed = w.projectile_speed * BULLET_SPEED_SCALE * game.mods.bullet_speed,
+					speed = launch,
+					accel = accel and accel.rate or nil,
+					max_speed = rated,
 					dist_left = range * (FLAME[w.id] and (0.6 + love.math.random() * 0.4) or 1),
 					damage = w.damage_effective * game.mods.dmg
 						* class_dmg * reflex_dmg * stand_dmg
 						* (game.effects.FIRE_BULLETS and 2 or 1),
-					explosive = EXPLOSIVE[w.id] or nil,
+					explosive = w.traits and w.traits.blast or nil,
 					flame = FLAME[w.id] or nil,
 					fire = game.effects.FIRE_BULLETS and true or nil,
 					-- which sprite off game/projs.tga this round wears, and the
@@ -1427,8 +1433,12 @@ local function exit_spatter(game, family, weapon_id, x, y, dir, power, count)
 end
 
 --- Rocket-class detonation: area damage with linear falloff to the edge.
-local function explode(game, x, y, base_damage, art)
-	local radius = 80
+-- `blast` is the round's own trait table (game/traits.lua); the defaults are
+-- the numbers this was written with, so a round carrying no sizes still goes
+-- off the way the port has always made them go off.
+local function explode(game, x, y, base_damage, art, blast)
+	local radius = (blast and blast.radius) or 80
+	local power = (blast and blast.damage) or 2
 	particles.explosion(x, y, radius, art and BLAST_TINT[art])
 	audio.play_sound("sfx/explosion_medium")
 	game.shake(5)
@@ -1439,7 +1449,12 @@ local function explode(game, x, y, base_damage, art)
 		local reach = radius + 16 * c.scale
 		if dist < reach then
 			local falloff = 1 - 0.7 * (dist / reach)
-			damage_creature(game, c, base_damage * 2 * falloff)
+			local dmg = base_damage * power * falloff
+			-- thrown away from the blast rather than along a round's line: an
+			-- explosion has no direction of its own, only an outside
+			gibs.push(c, ddx / math.max(dist, 1e-6), ddy / math.max(dist, 1e-6),
+				dmg * gibs.BLAST_SPEED)
+			damage_creature(game, c, dmg)
 		end
 	end
 end
@@ -1774,6 +1789,11 @@ local function hit_creature(game, b, c)
 		c.poison_t = 4 -- refreshed on every hit
 	end
 
+	-- What the round carries, handed to the body before the body is asked
+	-- whether it survived: if this is the hit that kills, the parts leave along
+	-- the round's own line instead of in an even ring (game/gibs.lua).
+	gibs.push(c, b.dx, b.dy, b.damage * b.speed)
+
 	local killed = damage_creature(game, c, b.damage)
 	-- The killing blow throws harder than the hits it survived, so the moment a
 	-- creature breaks is seen rather than inferred from it falling over.
@@ -1788,6 +1808,9 @@ local function update_bullets(game, dt)
 		local b = game.bullets[i]
 		local tr = b.traits
 
+		-- a rocket is under power: it leaves the barrel slow and builds to the
+		-- speed the weapon table gives it (game/traits.lua)
+		if b.accel then b.speed = math.min(b.max_speed, b.speed + b.accel * dt) end
 		if tr and tr.homing then steer_homing(game, b, dt) end
 
 		local step = b.speed * dt
@@ -1803,7 +1826,7 @@ local function update_bullets(game, dt)
 
 		-- rockets that reach max range detonate instead of fizzling
 		if dead and b.explosive then
-			explode(game, b.x, b.y, b.damage, b.art)
+			explode(game, b.x, b.y, b.damage, b.art, b.explosive)
 		elseif dead and not b.hit and love.math.random() < MISS_MARK_CHANCE then
 			-- A round that hit nothing still went somewhere. Marking where it
 			-- landed is what makes a spray legible: the ground shows the shape
@@ -1826,7 +1849,7 @@ local function update_bullets(game, dt)
 					if ddx * ddx + ddy * ddy < r * r then
 						game.hits = game.hits + 1
 						if b.explosive then
-							explode(game, b.x, b.y, b.damage, b.art)
+							explode(game, b.x, b.y, b.damage, b.art, b.explosive)
 							dead = true
 						else
 							hit_creature(game, b, c)
@@ -2597,10 +2620,12 @@ end
 -- reads weapons.xml's own type/flags). The fourth sprite -- a wide white
 -- dome at (5,26,55,27) -- matches nothing this port fires, so it is left
 -- alone rather than guessed into service.
--- How far a kinetic round's trail reaches back. Long enough to read as a
--- tracer at the speeds in BULLET_SPEED_SCALE, short enough that a minigun
--- does not draw a solid line to whatever it is pointed at.
-local BULLET_TRAIL = 22
+-- How thick a kinetic round's trail is. How *long* it is no longer lives here:
+-- a fixed 22 pixels drew the Gauss Gun's hypervelocity slug with the same smear
+-- as a pistol round, so length comes off the round's own speed now
+-- (data.tracer). The width stays a constant, because a tracer is a line
+-- whatever is drawing it.
+local BULLET_TRAIL_W = 3
 
 local PROJ_SHEET = "game/projs.tga"
 -- An energy bolt's size rides on the round (game/data.lua computes it per
@@ -2842,12 +2867,15 @@ function game.draw()
 			draw_proj("wave", b.x, b.y, rot + math.pi / 2, 0.7, 1, 0.92, 0.6, 0.9, true)
 		elseif bullet_img then
 			-- kinetic: the trail is drawn from its own right edge, so it lies
-			-- behind the round along the way it came
+			-- behind the round along the way it came. Its length and colour are
+			-- the round's own speed (game/data.lua), which is the whole of what
+			-- makes the Gauss Gun a railgun rather than a fast bullet.
 			if trail_img then
+				local len, tr, tg, tb, ta = data.tracer(b.speed)
 				love.graphics.setBlendMode("add")
-				love.graphics.setColor(1, 0.9, 0.6, 0.3)
+				love.graphics.setColor(tr, tg, tb, ta)
 				love.graphics.draw(trail_img, b.x, b.y, rot,
-					BULLET_TRAIL / trail_img:getWidth(), 3 / trail_img:getHeight(),
+					len / trail_img:getWidth(), BULLET_TRAIL_W / trail_img:getHeight(),
 					trail_img:getWidth(), trail_img:getHeight() / 2)
 				love.graphics.setBlendMode("alpha")
 			end

@@ -224,6 +224,17 @@ local function align_axes(align)
 	return ax, ay
 end
 
+--- A comp's own scale on each axis. The layouts tilt things with angle.x /
+-- angle.y (radians) and the engine approximates that 3D flip as axis scaling,
+-- so the two belong together everywhere the transform is reproduced.
+local function scale_axes(comp)
+	local sx = num(comp, "scale", 1)
+	local sy = sx
+	local sv = comp.props.scale
+	if type(sv) == "table" then sx, sy = sv[1] or 1, sv[2] or sv[1] or 1 end
+	return sx * math.cos(num(comp, "angle.y", 0)), sy * math.cos(num(comp, "angle.x", 0))
+end
+
 -- ------------------------------------------------------- transform/draw
 
 -- Layout semantics (verified against logo/items/buttons geometry):
@@ -243,15 +254,7 @@ local function apply_transform(comp, parent_w, parent_h, parent_ax, parent_ay)
 	love.graphics.translate(x, y)
 	local angle = num(comp, "angle", 0)
 	if angle ~= 0 then love.graphics.rotate(angle) end
-	local sx = num(comp, "scale", 1)
-	local sy = sx
-	local sv = comp.props.scale
-	if type(sv) == "table" then sx, sy = sv[1] or 1, sv[2] or sv[1] or 1 end
-	-- approximate 3D flips (angle.x/angle.y in radians) as axis scaling
-	local angx = num(comp, "angle.x", 0)
-	local angy = num(comp, "angle.y", 0)
-	sx = sx * math.cos(angy)
-	sy = sy * math.cos(angx)
+	local sx, sy = scale_axes(comp)
 	if sx ~= 1 or sy ~= 1 then love.graphics.scale(sx, sy) end
 	-- move origin to comp anchor
 	love.graphics.translate(-ax * w, -ay * h)
@@ -648,35 +651,41 @@ end
 
 -- ---------------------------------------------------------------- hit test
 
--- compute the screen-space axis-aligned bounds of a comp (debug aid)
+--- Where a comp actually lands on screen, in reference units: x, y of its
+-- top-left corner and the width/height it is drawn at.
+--
+-- Walks root-downwards the way comps.draw does, because a comp's box is its
+-- ancestors' transform applied to it — scale included. Skipping that scale is
+-- what put the weapon gallery's price labels up to 30px away from the plate
+-- they belong to: the 30 plates hang off an Aligner scaled to 0.92, so the
+-- error grew with distance from the grid's centre.
+--
+-- Rotation is still ignored: nothing in the menus rotates, and an
+-- axis-aligned box for something that did would be a lie either way.
 function comps.screen_rect(comp)
-	-- walk up the tree accumulating translations (ignores rotation/scale
-	-- of ancestors for simplicity; good enough for menu debugging)
-	local x, y = 0, 0
+	local chain = {}
 	local c = comp
-	local parent = comp.parent
-	local pw, ph, pax, pay
-	while parent do
-		pw, ph = comps.area(parent)
-		local pax2, pay2 = align_axes(parent.props.align)
-		local px, py = pos2(c, "position")
-		local ox, oy = pos2(c, "position_offset")
-		local cax, cay = align_axes(c.props.align)
-		local w, h = comps.area(c)
-		x = x + pax2 * pw + (px + ox) * pw - cax * w
-		y = y + pay2 * ph + (py + oy) * ph - cay * h
-		c = parent
-		parent = parent.parent
+	while c do table.insert(chain, 1, c) c = c.parent end
+
+	-- screen = (ox, oy) + (sx, sy) * point-in-the-current-parent's-space
+	local ox, oy, sx, sy = 0, 0, 1, 1
+	-- the root's parent is the screen itself, whose align point is its corner
+	local pw, ph, pax, pay = 960, 640, 0, 0
+	local w, h = 0, 0
+	for _, node in ipairs(chain) do
+		local px, py = pos2(node, "position")
+		local offx, offy = pos2(node, "position_offset")
+		local ax, ay = align_axes(node.props.align)
+		local nsx, nsy = scale_axes(node)
+		w, h = comps.area(node)
+		-- the comp's own align point goes to the position; back off to its
+		-- top-left, which the comp's own scale has already stretched
+		ox = ox + sx * ((pax + px + offx) * pw - ax * w * nsx)
+		oy = oy + sy * ((pay + py + offy) * ph - ay * h * nsy)
+		sx, sy = sx * nsx, sy * nsy
+		pw, ph, pax, pay = w, h, ax, ay
 	end
-	-- c is now a root comp; apply its own screen-space placement
-	local ax, ay = align_axes(c.props.align)
-	local px, py = pos2(c, "position")
-	local ox, oy = pos2(c, "position_offset")
-	local w, h = comps.area(c)
-	x = x + (px + ox) * 960 - ax * w
-	y = y + (py + oy) * 640 - ay * h
-	local cw, ch = comps.area(comp)
-	return x, y, cw, ch
+	return ox, oy, w * sx, h * sy
 end
 
 local CLICKABLE = { Button = true, Checkbox = true, Slider = true, Editbox = true,

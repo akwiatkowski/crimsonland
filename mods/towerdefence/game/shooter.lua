@@ -35,6 +35,13 @@ end
 local BULLET_SPEED_SCALE = 16
 local RANGE_SCALE = 4
 
+-- How far out from the shooter a round appears, in world pixels: the end of
+-- the barrel rather than the middle of whoever is holding it. Public because a
+-- mount solving for an intercept has to solve from the place the round really
+-- starts (game/plots.lua) -- twenty pixels of head start arrives early enough
+-- to miss a walking creature by half its own body.
+shooter.MUZZLE_OFFSET = 20
+
 -- Flame weapons are short-ranged sprays, not rifles: the XML range is the
 -- number every weapon carries and it makes a flamethrower reach across the
 -- map. Vanilla cuts it to 0.18 for the same reason.
@@ -44,6 +51,35 @@ function shooter.clip_size(owner)
 	if not owner.weapon then return 0 end
 	local m = mods_of(owner)
 	return math.max(1, math.floor(owner.weapon.clip_size * m.clip + 0.5) + m.clip_add)
+end
+
+--- How fast this shooter's rounds fly, in world pixels per second.
+--
+-- Public because a mount has to know it to work out where a creature will be
+-- when the round arrives (game/plots.lua). Reading it off the weapon at the
+-- call site instead would be two copies of the same conversion, and the aim
+-- would quietly stop matching the bullet the first time either changed.
+function shooter.bullet_speed(owner)
+	local w = owner.weapon
+	if not w then return 0 end
+	return w.projectile_speed * BULLET_SPEED_SCALE * mods_of(owner).bullet_speed
+end
+
+--- How far behind a constant-speed round this weapon's rounds run, in seconds.
+--
+-- A rocket spends its first third of a second below its rated speed, and the
+-- distance it gives away doing so is fixed however far it flies:
+-- (vmax - v0)^2 / 2a. Divided by the top speed that is a constant delay -- and
+-- a constant delay is what lets a mount lead an accelerating round with the
+-- same closed-form solve it uses for a bullet (game/plots.lua). Zero for
+-- everything that leaves the barrel at speed.
+function shooter.launch_lag(owner)
+	local tr = owner.weapon and owner.weapon.traits
+	if not (tr and tr.accel and tr.accel.rate > 0) then return 0 end
+	local vmax = shooter.bullet_speed(owner)
+	if vmax <= 0 then return 0 end
+	local v0 = vmax * tr.accel.from
+	return (vmax - v0) ^ 2 / (2 * tr.accel.rate) / vmax
 end
 
 --- How far this weapon's rounds actually travel, in world pixels.
@@ -68,13 +104,23 @@ function shooter.fire(field, owner)
 			{ layer = "world", fade = 0.25 })
 	end
 	local range = shooter.range(w)
+	local speed = shooter.bullet_speed(owner)
+	-- What this round *does*, as opposed to how big its numbers are: the same
+	-- overlay vanilla reads (mods/vanilla/game/traits.lua), because a weapon
+	-- has to mean the same thing on a mount as it does in your hands.
+	local tr = w.traits
 	for _ = 1, w.num_projectiles do
 		local a = owner.angle + (love.math.random() - 0.5) * 2 * w.spread
 		field.bullets[#field.bullets + 1] = {
-			x = owner.x + math.cos(owner.angle) * 20,
-			y = owner.y + math.sin(owner.angle) * 20,
+			x = owner.x + math.cos(owner.angle) * shooter.MUZZLE_OFFSET,
+			y = owner.y + math.sin(owner.angle) * shooter.MUZZLE_OFFSET,
 			dx = math.cos(a), dy = math.sin(a),
-			speed = w.projectile_speed * BULLET_SPEED_SCALE * m.bullet_speed,
+			-- a rocket leaves the tube under power, not at speed
+			speed = tr and tr.accel and speed * tr.accel.from or speed,
+			accel = tr and tr.accel and tr.accel.rate or nil,
+			max_speed = speed,
+			traits = tr,
+			blast = tr and tr.blast or nil,
 			dist_left = range,
 			damage = w.damage_effective * m.dmg,
 			art = w.proj_art,

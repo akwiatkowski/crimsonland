@@ -258,48 +258,184 @@ local function mark_all_seen()
 	end
 end
 
---- Price under every plate, in the colour of what it means: owned, affordable,
--- out of reach. A shop where you cannot see what you cannot afford is a shop
--- that makes the decision for you.
+-- The shop's own ink, for the veil over what is out of reach and for the
+-- payment bar's track. Darker than the panel, so a veiled plate reads as
+-- switched off rather than merely tinted.
+local INK = { 0.02, 0.02, 0.03 }
+
+-- How hard each refusal reads. Both are set so the gun underneath is still
+-- recognisable -- thirty pieces of weapon art are the best thing on this
+-- screen and blacking most of them out was worse than the mess it replaced.
+-- Not affording something is a maybe, and the money is coming; a mount that
+-- cannot carry the weapon is a no for as long as that mount stands.
+local VEIL_SHORT = 0.5
+local VEIL_REFUSED = 0.72
+
+--- Everything the shop has to say about one weapon, as a single state. The
+-- plate draws it and the line under the title spells it out, so the two can
+-- never disagree about what is on offer.
+local function verdict(entry, price)
+	-- a light mount cannot take a cannon, and finding that out after paying
+	-- for it would be the shop lying
+	if mount_target and not plots.accepts(mount_target, entry) then return "refused" end
+	if field.player.weapon and field.player.weapon.id == entry.id then return "held" end
+	if field.owned[entry.id] then return "owned" end
+	if field.money >= price then return "afford" end
+	return "short"
+end
+
+local function fill(x, y, w, h, c, a)
+	love.graphics.setColor(c[1], c[2], c[3], a or 1)
+	love.graphics.rectangle("fill", x, y, w, h)
+end
+
+local function outline(x, y, w, h, c)
+	love.graphics.setColor(c[1], c[2], c[3], 1)
+	love.graphics.setLineWidth(2)
+	love.graphics.rectangle("line", x + 1, y + 1, w - 2, h - 2)
+	love.graphics.setLineWidth(1)
+end
+
+-- The payment bar lives in the plate's bottom margin. The art is 77x38 inside
+-- a 103x50 plate, so those few pixels are the only ones on it that are neither
+-- border nor gun.
+local BAR_INSET = 9
+local BAR_HEIGHT = 3
+
+--- A plate, saying what it costs without writing a number on the gun.
+--
+-- There is no room for one that would not sit on the art -- which is what this
+-- shop did before, and why thirty pieces of weapon art read as vandalised. So
+-- the plate answers in light instead: a veil over what is out of reach, and a
+-- bar filled with the fraction of the price the money on hand covers. A full
+-- bar means take it, a half-full one means one more wave. The exact number is
+-- one hover away, under the title. Returns the state it drew.
+local function draw_plate(comp, entry, price)
+	local x, y, w, h = comps.screen_rect(comp)
+	local state = verdict(entry, price)
+
+	-- the pointer is a torch: whatever it rests on comes out from under the
+	-- veil, so you are never reading the line under the title about a weapon
+	-- you cannot see
+	if not comp.hover then
+		if state == "short" then
+			fill(x, y, w, h, INK, VEIL_SHORT)
+		elseif state == "refused" then
+			fill(x, y, w, h, INK, VEIL_REFUSED)
+		end
+	end
+
+	if state ~= "refused" then
+		local bx, by, bw = x + BAR_INSET, y + h - BAR_HEIGHT - 3, w - BAR_INSET * 2
+		if state == "held" or state == "owned" then
+			-- nothing left to pay: a full bar, in the colour of what it is
+			fill(bx, by, bw, BAR_HEIGHT, state == "held" and TOXIC or BONE, 0.9)
+		else
+			fill(bx, by, bw, BAR_HEIGHT, INK, 0.85)
+			fill(bx, by, bw * math.min(1, field.money / price), BAR_HEIGHT,
+				state == "afford" and BRASS or DIM)
+		end
+	end
+
+	-- A refusal and a gun already in your hands are facts about the run and
+	-- outrank the pointer, which is only ever passing through; hover marks the
+	-- plates that have nothing else to say.
+	local frame = (state == "refused" and BLOOD) or (state == "held" and TOXIC)
+		or (comp.hover and BRASS)
+	if frame then outline(x, y, w, h, frame) end
+	return state
+end
+
+--- The engine's inline colour markup (src/engine/font.lua), so one measured
+-- line can carry several colours.
+local function tag(c)
+	return ("|#%02x%02x%02x|"):format(
+		math.floor(c[1] * 255), math.floor(c[2] * 255), math.floor(c[3] * 255))
+end
+
+--- The line under the title: what the pointer is on. Sustained dps rather than
+-- the damage number, because that is what the price was computed from
+-- (game/prices) -- the shop quotes the same figure it charges for.
+local function dossier(entry, price)
+	if not entry then
+		if mount_target then
+			return tag(DIM) .. (mount_target.tier >= 2 and "Reinforced mount"
+				or "Light mount") .. "  -  point at a weapon to bolt it on"
+		end
+		return tag(DIM) .. "Point at a weapon to read it"
+	end
+	local state = verdict(entry, price)
+	local tail
+	if state == "refused" then tail = tag(BLOOD) .. "too heavy for this mount"
+	elseif state == "held" then tail = tag(TOXIC) .. "in hand"
+	elseif state == "owned" then tail = tag(BONE) .. "owned"
+	else tail = tag(state == "afford" and BRASS or DIM) .. ("$%d"):format(price)
+	end
+	return ("%s%s   %s%.0f dps  -  clip %d  -  %.1fs reload   %s"):format(
+		tag(BONE), entry.name or entry.id, tag(DIM), prices.dps(entry),
+		entry.clip_size or 0, entry.reload_time or 0, tail)
+end
+
+--- What taking it would leave, under the money itself -- the one question a
+-- price tag cannot answer on its own.
+local function balance(entry, price)
+	if not entry then return nil end
+	local state = verdict(entry, price)
+	if state == "afford" then
+		return ("leaves $%d"):format(field.money - price), BRASS
+	elseif state == "short" then
+		return ("short $%d"):format(price - field.money), BLOOD
+	end
+	return nil
+end
+
+--- The grid, and the three things the plates cannot say: what the pointer is
+-- on, what the money reaches, and that the wave does not stop for a shop.
 local function draw_armoury(screen)
 	if not field then return end
+	local hovered, hovered_price, reach, total = nil, nil, 0, 0
+
 	for _, comp in ipairs(screen.comps) do
 		local i = gallery.slot_index(comp, "Weapon")
 		local entry = i and gallery.entry_at("weapon", i)
 		local price = entry and prices.weapon(entry)
 		if price then
-			local x, y, w, h = comps.screen_rect(comp)
-			local held = field.player.weapon and field.player.weapon.id == entry.id
-			local owned = field.owned[entry.id]
-			local label, colour
-			if mount_target and not plots.accepts(mount_target, entry) then
-				-- a light mount cannot take a cannon, and finding that out
-				-- after paying for it would be the shop lying
-				label, colour = "TOO HEAVY", BLOOD
-			elseif held then
-				label, colour = "IN HAND", TOXIC
-			elseif owned then
-				label, colour = "OWNED", BONE
-			else
-				label = ("$%d"):format(price)
-				colour = (field.money >= price) and BRASS or DIM
-			end
-			-- inside the plate, not under it: the grid's bottom row sits on the
-			-- Back button, and a price drawn in that gap lands on top of it
-			font.draw(F_SMALL, label, x + 6, y + h - 20, colour)
+			-- what the count says and what the veil shows are the same fact,
+			-- so they are read off the same state
+			local state = draw_plate(comp, entry, price)
+			total = total + 1
+			if state ~= "short" and state ~= "refused" then reach = reach + 1 end
+			if comp.hover then hovered, hovered_price = entry, price end
 		end
 	end
+	love.graphics.setColor(1, 1, 1, 1)
 
-	-- what there is to spend, beside the title. The grid says the rest: a price
-	-- you can pay is brass, one you cannot is grey, and what you already have
-	-- says so instead of costing anything.
 	local panel = screen.compmap.panel
-	if panel then
-		local px, py, pw = comps.screen_rect(panel)
-		local money = ("$%d"):format(field.money)
-		font.draw(F_MEDIUM, money, px + pw - font.measure(F_MEDIUM, money) - 40,
-			py + 44, BRASS)
+	if not panel then return end
+	local px, py, pw = comps.screen_rect(panel)
+	local function right(f, text, y, colour)
+		font.draw(f, text, px + pw - font.measure(f, text) - 46, y, colour)
 	end
+
+	local money = ("$%d"):format(field.money)
+	right(F_MEDIUM, money, py + 44, BRASS)
+	local left_over, left_colour = balance(hovered, hovered_price)
+	if left_over then right(F_SMALL, left_over, py + 88, left_colour) end
+
+	local line = dossier(hovered, hovered_price)
+	font.draw(F_SMALL, line, px + (pw - font.measure(F_SMALL, line)) / 2, py + 96)
+
+	-- Either side of the Back button, in the band the grid leaves free: what
+	-- standing here costs, and how far the money goes. The HQ is at the centre
+	-- of the map and the wave keeps coming while the shop is open, so the
+	-- clock belongs on the counter (game/field).
+	if field.lull > 0 then
+		font.draw(F_SMALL, ("Wave %d arrives in %ds"):format(field.wave,
+			math.ceil(field.lull)), px + 46, py + 485, TOXIC)
+	else
+		font.draw(F_SMALL, "The wave is still out there", px + 46, py + 485, BLOOD)
+	end
+	right(F_SMALL, ("%d of %d within reach"):format(reach, total), py + 485, DIM)
 end
 
 -- ------------------------------------------------------------------ opening
@@ -362,7 +498,12 @@ function hq.on_screen_enter(screen_name, screen)
 		mark_all_seen()
 		gallery.fill(screen, "Weapon", "weapon")
 		local title = screen.compmap.TimeTitle
-		if title then comps.set(title, "textbox.text", { "Armoury" }) end
+		-- the same grid answers two questions, and the title says which one is
+		-- being asked: what to buy, or what to bolt onto the mount out there
+		if title then
+			comps.set(title, "textbox.text",
+				{ mount_target and "Arm the mount" or "Armoury" })
+		end
 	end
 end
 

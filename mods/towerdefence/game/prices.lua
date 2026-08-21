@@ -49,7 +49,8 @@ function prices.repair(missing)
 end
 
 --- Everything buyable in the armoury, cheapest first. Weapons the port cannot
--- serve (no icon in the pak, nothing to draw on the plate) are left out.
+-- serve (no icon in the pak, so nothing for the armoury's plates to carry) are
+-- left out.
 function prices.catalogue()
 	data.load_all()
 	local list = {}

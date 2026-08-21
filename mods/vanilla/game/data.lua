@@ -8,6 +8,15 @@ local traits = require("mods.vanilla.game.traits")
 
 local data = {}
 
+-- Which datasets have been parsed. The pak is read-only, so a second parse can
+-- only rebuild the tables it built the first time -- and callers treat loading
+-- as free: the tower defence armoury asks for a weapon entry once per plate on
+-- every frame, which was 30 full parses of ~100KB of XML per frame (11ms a
+-- call, measured) and dropped the shop to a slideshow. Each loader sets its
+-- flag once it has finished, so a read that throws part-way is retried rather
+-- than remembered as done.
+local loaded = {}
+
 local function read_xml(path)
 	local text = love.filesystem.read(paths.ASSETS .. "/" .. path)
 	if not text then return nil end
@@ -75,6 +84,55 @@ local function bolt_scale(damage, speed)
 		* math.sqrt(damage * BOLT_REF_SPEED / math.max(1, speed))
 end
 
+-- The streak a kinetic round leaves behind it.
+--
+-- weapons.xml says nothing about a railgun. The Gauss Gun is type 0, flags 1 --
+-- the same kinetic round as the Assault Rifle and the Shotgun -- and the single
+-- thing that separates it in the whole file is projectile_speed="215", against
+-- 10 to 60 for the other thirty-seven. That outlier *is* the railgun, and a
+-- port that draws every kinetic round as the same little sprite throws the only
+-- evidence away: the slug reads as a bullet in a hurry rather than a ray.
+--
+-- So the trail is motion blur, which is what a tracer is: the round's own speed
+-- times a shutter time. A pistol round smears twenty pixels and still reads as
+-- a bullet; the Gauss Gun smears eighty and reads as a line drawn across the
+-- field. No weapon is named anywhere in here -- the effect belongs to the
+-- number, so a perk that speeds rounds up lengthens their tracers too.
+local TRACER_EXPOSURE = 1 / 45 -- seconds of shutter
+-- World pixels per second at which a round is as ionised as it gets. The Gauss
+-- Gun does 3440 and is the only thing near it; the rest of the arsenal sits
+-- between 160 and 960, down in the warm end.
+local TRACER_HYPER = 2400
+local TRACER_SLOW = { 1.00, 0.90, 0.60 } -- a burning tracer
+local TRACER_FAST = { 0.72, 0.88, 1.00 } -- air that has been ionised, not lit
+-- Brightness at the reference streak, and the length it refers to. A frame
+-- catches the same light however far the round smeared it, so a longer streak
+-- is a fainter one -- strictly that is 1/length, which leaves the Gauss Gun at
+-- a tenth of an alpha and effectively invisible on a dark field. The square
+-- root splits the difference: still visibly dimmer for being longer, still
+-- there.
+local TRACER_ALPHA = 0.34
+local TRACER_REF = 22
+
+--- How long a kinetic round's tracer is, and what colour, for a round doing
+-- `speed` world pixels a second. Returns length, r, g, b, alpha.
+function data.tracer(speed)
+	-- Never shorter than the gap the round leaves between two frames, or a fast
+	-- round draws a dashed line instead of a ray. This is the same reason a real
+	-- shutter blurs: the streak has to cover the distance the frame missed.
+	local exposure = math.max(TRACER_EXPOSURE, love.timer.getDelta())
+	local len = math.max(1, speed * exposure)
+	local k = math.min(1, speed / TRACER_HYPER)
+	return len,
+		TRACER_SLOW[1] + (TRACER_FAST[1] - TRACER_SLOW[1]) * k,
+		TRACER_SLOW[2] + (TRACER_FAST[2] - TRACER_SLOW[2]) * k,
+		TRACER_SLOW[3] + (TRACER_FAST[3] - TRACER_SLOW[3]) * k,
+		-- capped, so the reference streak is the brightest one there is: a short
+		-- smear being *brighter* than the old constant would be the trade
+		-- running the wrong way, and nothing here is meant to add light
+		math.min(TRACER_ALPHA, TRACER_ALPHA * math.sqrt(TRACER_REF / len))
+end
+
 -- Which sprite off game/projs.tga a weapon's rounds are drawn with.
 --
 -- weapons.xml carries the answer in two attributes nothing else in this port
@@ -134,6 +192,7 @@ local function projectile_art(id, wtype, flags)
 end
 
 function data.load_weapons()
+	if loaded.weapons then return end
 	local root = read_xml("weapons/weapons.xml")
 	local arr = xml.array(root, "WEAPONS")
 	for _, node in ipairs(arr.children) do
@@ -235,6 +294,7 @@ end
 data.creatures = {} -- type -> table
 
 function data.load_creatures()
+	if loaded.creatures then return end
 	local root = read_xml("creatures/creatures.xml")
 	for _, arr in ipairs(root.children) do
 		if arr.tag == "array" then
@@ -263,6 +323,7 @@ function data.load_creatures()
 			data.creatures[c.id] = c
 		end
 	end
+	loaded.creatures = true
 end
 
 -- gameplay variants from creature-variants.xml
@@ -270,6 +331,7 @@ data.variants = {} -- variant id -> table
 data.base_variant = {} -- creature type -> lowest-index variant
 
 function data.load_variants()
+	if loaded.variants then return end
 	local root = read_xml("creatures/creature-variants.xml")
 	local arr = xml.array(root, "VARIANTS")
 	for _, node in ipairs(arr.children) do
@@ -309,6 +371,7 @@ function data.load_variants()
 			data.base_variant[v.type] = v
 		end
 	end
+	loaded.variants = true
 end
 
 -- ------------------------------------------------------------ terrains
@@ -316,6 +379,7 @@ end
 data.terrains = {} -- chapter id -> ops list
 
 function data.load_terrains()
+	if loaded.terrains then return end
 	local root = read_xml("terrains/terrains.xml")
 	for _, arr in ipairs(root.children) do
 		if arr.tag == "array" then

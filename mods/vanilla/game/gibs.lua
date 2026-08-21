@@ -31,9 +31,45 @@ local MAX_GIBS = 140
 -- inside its life, so it bakes where it came to rest rather than mid-flight.
 local DRAG = 0.5 ^ 4
 
+-- What the round leaves behind besides a hole.
+--
+-- A death used to throw its parts in an even ring, which reads as a body
+-- exploding on the spot however it died -- the same picture whether it walked
+-- into a flame or took a shotgun at point-blank. A round carries momentum, and
+-- the body it lands in carries that momentum away: the parts still scatter, but
+-- the whole cloud travels downrange, which is the only thing on screen that
+-- says which side the shot came from.
+--
+-- Momentum is damage times the speed the round was actually doing, out of the
+-- weapon's own numbers rather than a table of feels-right values per gun. It
+-- orders the arsenal the way the arsenal deserves: a flamethrower's stream and
+-- a minigun's needles barely nudge a corpse, a pistol shoves it, the Rocket
+-- Launcher throws it, and the Gauss Gun -- one 5.4-damage slug at fourteen
+-- times a shotgun pellet's speed -- pins the scale on its own.
+--
+-- PUSH_FULL is where the push stops growing, in world units of damage x
+-- pixels/second. 14400 is a little above one full Shotgun blast (12 pellets,
+-- ~10900 between them), so buckshot at close range lands near the top of the
+-- scale without being the only thing that reaches it.
+local PUSH_FULL = 14400
+local PUSH_MAX = 260 -- pixels/second added to every part, at PUSH_FULL
+
+-- How long the hits that made a kill stay countable. A shotgun's twelve pellets
+-- land in one frame and a minigun's stream inside a fifth of a second, and both
+-- of those are one blow as far as the body is concerned; a round that landed
+-- two seconds ago is not, and must not still be steering the parts when
+-- something else finishes the job.
+local PUSH_WINDOW = 0.15
+
+-- A blast has damage but no round to read a speed off, so it needs one to be
+-- weighed on the same scale as a bullet. 700 puts a Rocket Launcher's twenty
+-- points at the centre of its own explosion just above a full Shotgun blast,
+-- which is the right order: the thing you fire at a crowd throws bodies hardest.
+gibs.BLAST_SPEED = 700
+
 local pool = {}
 
-local function throw(seq, x, y, scale, tint, n)
+local function throw(seq, x, y, scale, tint, n, px, py)
 	for _ = 1, n do
 		if #pool >= MAX_GIBS then return end
 		local a = love.math.random() * math.pi * 2
@@ -44,8 +80,10 @@ local function throw(seq, x, y, scale, tint, n)
 			frame = love.math.random(1, math.max(1, seq.count)),
 			x = x,
 			y = y,
-			dx = math.cos(a) * speed,
-			dy = math.sin(a) * speed,
+			-- the scatter, plus what the round was carrying: every part gets the
+			-- same push, so the cloud moves while the parts still fly apart
+			dx = math.cos(a) * speed + px,
+			dy = math.sin(a) * speed + py,
 			angle = love.math.random() * math.pi * 2,
 			spin = (love.math.random() - 0.5) * 16,
 			scale = scale,
@@ -56,9 +94,48 @@ local function throw(seq, x, y, scale, tint, n)
 	end
 end
 
+--- Remember a round landing: `dx, dy` is the direction it was travelling (a
+-- unit vector) and `momentum` is its damage times its speed.
+--
+-- Hits inside PUSH_WINDOW of each other add up, which is what makes a shotgun
+-- different from the rifle that does the same damage one round at a time: the
+-- twelve pellets are one blow, and the body goes with them. Everything the
+-- caller needs to know is the direction the round was going -- not where the
+-- shooter stood, because a round that curved or was fired from a mount across
+-- the field still throws the parts the way *it* was going.
+function gibs.push(c, dx, dy, momentum)
+	local now = love.timer.getTime()
+	if not c.push_t or now - c.push_t > PUSH_WINDOW then
+		c.push_p = 0
+		c.push_x, c.push_y = 0, 0
+	end
+	-- summed as momentum (a vector), so two rounds from opposite sides cancel
+	-- the way they should rather than throwing the parts twice as hard
+	c.push_x = c.push_x + dx * momentum
+	c.push_y = c.push_y + dy * momentum
+	c.push_t = now
+end
+
+--- The velocity the round leaves in the parts: the accumulated momentum, capped,
+-- and divided by how much creature there is to move. Nothing if the last round
+-- landed too long ago to be what killed it.
+local function push_velocity(c, scale)
+	if not c.push_t or love.timer.getTime() - c.push_t > PUSH_WINDOW then
+		return 0, 0
+	end
+	local px, py = c.push_x or 0, c.push_y or 0
+	local p = math.sqrt(px * px + py * py)
+	if p <= 0 then return 0, 0 end
+	-- same impulse into more creature moves it less, which is why the big ones
+	-- come apart where they stood and the small ones are thrown off their feet
+	local speed = PUSH_MAX * math.min(1, p / PUSH_FULL) / scale
+	return px / p * speed, py / p * speed
+end
+
 --- Throw one creature's parts. Takes the creature because everything needed
--- (which sheets, how big, what colour) already hangs off it. `mul` multiplies
--- how many come off, for a death that was an overkill rather than a kill.
+-- (which sheets, how big, what colour, and what hit it) already hangs off it.
+-- `mul` multiplies how many come off, for a death that was an overkill rather
+-- than a kill.
 function gibs.spawn(c, mul)
 	local def, v = c.def, c.variant
 	if not def then return end
@@ -66,16 +143,17 @@ function gibs.spawn(c, mul)
 	local scale = c.scale or (v and v.scale) or 1
 	-- the same tint the corpse bakes with: a green alien sheds green parts
 	local tint = v and { v.r, v.g, v.b } or { 1, 1, 1 }
+	local px, py = push_velocity(c, scale)
 
 	local uniq = def.gibs_unique and bms.load(def.gibs_unique)
 	if uniq then
 		throw(uniq, c.x, c.y, scale, tint,
-			math.ceil(love.math.random(UNIQUE_MIN, UNIQUE_MAX) * mul))
+			math.ceil(love.math.random(UNIQUE_MIN, UNIQUE_MAX) * mul), px, py)
 	end
 	local common = def.gibs_common and bms.load(def.gibs_common)
 	if common then
 		throw(common, c.x, c.y, scale, tint,
-			math.ceil(love.math.random(COMMON_MIN, COMMON_MAX) * mul))
+			math.ceil(love.math.random(COMMON_MIN, COMMON_MAX) * mul), px, py)
 	end
 end
 

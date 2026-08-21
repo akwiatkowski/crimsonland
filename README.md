@@ -139,12 +139,32 @@ with. Each mod keeps its own profile — progress, achievements, statistics and
 settings — under `~/Library/Application Support/Crimsonland/mods/<name>/`, so
 playing a debug cartridge cannot unlock anything in the base game.
 
-Scenarios: `quest-smoke`, `quest-fast`, `quest-win` (an AI plays chapter 1
-quest 1 to the end, for the completed panel), `combat-smoke` (an AI plays, so
-weapons/hits/drops are exercised), `survival-smoke`, `rush-smoke`,
+Hand-written scenarios: `quest-smoke`, `quest-fast`, `quest-win` (an AI plays
+chapter 1 quest 1 to the end, for the completed panel), `combat-smoke` (an AI
+plays, so weapons/hits/drops are exercised), `survival-smoke`, `rush-smoke`,
 `menus-smoke` (galleries + statistics), `options-smoke`, `fx-smoke`,
 `emitter-smoke`, `editbox-smoke`, `perks-smoke`, `custom-smoke`,
-`allweapons-smoke` (needs `MOD=allweapons`).
+`allweapons-smoke` and `allweapons-bolts` (need `MOD=allweapons`),
+`terrain-smoke`, `gore-smoke`, `impact-smoke`, `traits-smoke`, plus the `td-*`
+set (needs `MOD=towerdefence`).
+
+Data invariants, which assert rather than only avoid crashing: `drop-table`
+(every index a weapon drop can reach is a weapon a player can hold),
+`creature-data` (the art table against the variant table, both ways),
+`variant-colour` (the authored per-variant alpha), `june-2015-content` (the
+three comps one feature flag gates), `attract-demos` (the menu backdrop runs
+the five authored scenes), `mode-info` (the survival menu's mode panel).
+
+Parameterised scenarios, which the sweeps below drive rather than being run
+alone: `matrix` (`CL_WEAPON`, `CL_CREATURE`), `bake` and `bake-variety`
+(`CL_CHAPTER`, `CL_QUEST`), `mode` and `mode-menu` (`CL_MODE`), `lethality` and
+`weapon-details` (`CL_WEAPON`), `perk-details` (`CL_PERK`), `keep-display`
+(`CL_ANSWER`).
+
+A scenario fails on a stated claim, not only on a crash: a step may carry
+`expect = function() return ok, why end`, and the run's exit code is the answer.
+A Lua error prints a traceback and exits 1 rather than sitting on LÖVE's error
+screen for ever, which is what makes a few hundred unattended runs possible.
 
 Scenarios run on a fixed 1/60 clock as fast as the machine manages, not on
 real time — a minimized LÖVE window is App-Nap throttled on macOS, which used
@@ -156,6 +176,37 @@ A test run never opens a window at all (`conf.lua` creates it hidden under
 `~/Library/Application Support/Crimsonland-Test/` — so it can be left running
 while the machine is used for something else. Captures still come out: the
 canvas dumps and backbuffer screenshots land in LÖVE's own save directory.
+
+### Sweeps
+
+`tools/sweep.sh <axis> [jobs]` runs one axis of the matrix to exhaustion and
+tabulates. An axis is a parameterised scenario crossed with a list read out of
+`vendor/assets`, so the lists cannot drift from the data:
+
+| axis | what it crosses | runs | wall time |
+|--------------|----------------------------------------------|-----:|-----------|
+| `modes`      | six endless modes, each against its own rule  |    6 | 5–10 s    |
+| `modemenu`   | the same six, reached by clicking             |    6 | 5–15 s    |
+| `keepdisplay`| keep / revert / time out the resolution dialog|    3 | ~7 s      |
+| `variety`    | each chapter's ten grounds, hashed            |    7 | ~8 s      |
+| `details`    | every weapon's detail screen                  |   30 | 40–50 s   |
+| `lethality`  | every weapon against the first enemy          |   30 | ~40 s     |
+| `named`      | every hand-written scenario                   |   33 | ~100 s    |
+| `perkdetails`| every perk's detail screen                    |   56 | ~96 s     |
+| `bake`       | 7 chapters × 10 quests of ground              |   70 | ~60 s     |
+| `variants`   | all 102 creature variants                     |  102 | 65–120 s  |
+| `matrix`     | 30 weapons × 12 creature types                |  360 | 4–6.5 min |
+| `all`        | every axis above                              | ~700 | 12–13 min |
+
+Times are at the default of 4 jobs on an M4 Pro. **The job count is a RAM
+ceiling, not a CPU one**: each job is a whole LÖVE process that bakes its own
+3071×1728 terrain canvases, which is what makes a sweep felt on the machine
+running it. `tools/sweep.sh <axis> 1` does the same work one process at a time —
+roughly four times the wall clock, and the laptop stays usable. Four is for when
+you have stepped away.
+
+A single scenario is nearly free: `make test SCENARIO=weapon-details` is one
+process for about three seconds.
 
 In-game controls: WASD/arrows move, mouse aims, LMB fires, R reloads,
 Escape aborts the quest back to the menu.

@@ -27,7 +27,7 @@ run: check-love
 	$(LOVE) . --mod=$(MOD)
 
 # Shortcuts for the shipped cartridges — same as `make run MOD=<name>`.
-allweapons towerdefence: check-love
+allweapons enhanced towerdefence: check-love
 	$(LOVE) . --mod=$@
 
 SCENARIO ?= quest-smoke

@@ -55,6 +55,88 @@ local function fullscreen_modes()
 	return modes
 end
 
+-- ------------------------------------------------------- keeping the change
+--
+-- ui/keep-display-settings.lua is the dialog the original put between Apply and
+-- living with the result: "Keep Settings?", a Keep Changes button, a Revert
+-- button, and a Countdown that reverts on its own. Nothing could push it here,
+-- so Apply committed the change outright -- and the case the dialog exists for
+-- is the one where that is worst: a mode the display cannot show, leaving the
+-- player to find the options screen again on a screen showing nothing.
+--
+-- The wait is the layout's own number: the Countdown textbox ships storing "7"
+-- (keep-display-settings.lua:62).
+local KEEP_SECONDS = 7
+
+-- The mode to go back to, captured before Apply changed it. Read off the window
+-- rather than off platform.settings, because settings hold what was last saved
+-- and this has to restore what was on screen a moment ago.
+local previous = nil
+
+local function set_mode(width, height, fullscreen)
+	love.window.setMode(width, height, {
+		resizable = true,
+		fullscreen = fullscreen,
+		vsync = 1,
+		msaa = 4,
+		highdpi = true,
+	})
+	-- The canvas and the pointer mapping are both sized from the window, and
+	-- the engine recomputes them in love.resize -- which the OS fires when the
+	-- user drags a window edge, and does not reliably fire for a setMode we
+	-- made ourselves. Without this the viewport keeps the old window's scale
+	-- and offset, so every click after Apply is mapped to the wrong place:
+	-- the confirmation dialog's own buttons could not be clicked, which is how
+	-- this was found. love.resize *is* the engine's handler (init.lua assigns
+	-- it), so calling it is running the same code the event would have.
+	if love.resize then love.resize() end
+end
+
+local function commit()
+	previous = nil
+	require("src.engine.mod").game_call("save_settings")
+end
+
+local function revert()
+	if previous then
+		set_mode(previous.width, previous.height, previous.fullscreen)
+		platform.settings.width = previous.width
+		platform.settings.height = previous.height
+		platform.settings.windowed = not previous.fullscreen
+	end
+	-- nothing to undo on disk: keeping is what would have written it
+	previous = nil
+end
+
+--- Count the dialog down, and put the old mode back if nobody answers.
+--
+-- In the screen's update, not its draw: setMode cannot be called while a canvas
+-- is bound, and everything this port draws goes onto one. Doing it from a draw
+-- hook threw "love.window.setMode cannot be called while a Canvas is active"
+-- the first time a countdown ran out.
+--
+-- The pak's own OnUpdate is wrapped rather than replaced: it is what runs
+-- DoPanelTransitionFlipCenter, and without it the dialog would sit still.
+--
+-- Driven off the screen's own timer rather than one of its own, so there is no
+-- state to reset and no way for the two to drift -- the engine advances
+-- screen.timer for every screen on the stack.
+local function install_countdown(screen)
+	local base = screen.env.OnUpdate
+	screen.env.OnUpdate = function(dt)
+		if base then base(dt) end
+		local left = math.max(0, KEEP_SECONDS - (screen.timer or 0))
+		local countdown = screen.compmap["Countdown"]
+		if countdown then
+			comps.set(countdown, "textbox.text", { tostring(math.ceil(left)) })
+		end
+		if left <= 0 and not screen.leaving then
+			revert()
+			require("src.engine.screens").pop("KeepDisplaySettings")
+		end
+	end
+end
+
 function display.prepare(screen_name, screen)
 	-- The Options layout stacks Display Options and Gameplay on the same slot
 	-- and leaves it to the platform which one survives: Display is gated on
@@ -67,6 +149,11 @@ function display.prepare(screen_name, screen)
 		if gameplay and display_btn and comps.get(display_btn, "visible") then
 			comps.set(gameplay, "position", { 0, 0.2 })
 		end
+		return
+	end
+
+	if screen_name == "KeepDisplaySettings" then
+		install_countdown(screen)
 		return
 	end
 
@@ -97,26 +184,40 @@ function display.prepare(screen_name, screen)
 	end
 end
 
---- Apply is the only control the pak's own script does not handle.
+--- Apply is the only control the pak's own script does not handle, and the
+-- confirmation it now raises is the only other one.
 function display.on_click(screen_name, comp_name, screen)
+	if screen_name == "KeepDisplaySettings" then
+		if comp_name == "Keep" then
+			commit()
+		elseif comp_name == "Revert" then
+			revert()
+		else
+			return false
+		end
+		require("src.engine.screens").pop("KeepDisplaySettings")
+		return true
+	end
+
 	if screen_name ~= "DisplayOptions" or comp_name ~= "Apply" then return false end
 	local list = screen and screen.compmap["Resolutions"]
 	local mode = list and fullscreen_modes()[comps.num(list, "listbox.selected", 0)]
 	local windowed = screen and screen.compmap["Windowed"]
 	local want_windowed = windowed == nil or comps.get(windowed, "checkbox.value") == true
 
+	-- what to come back to if this turns out to be unviewable
+	local cur_w, cur_h, flags = love.window.getMode()
+	previous = { width = cur_w, height = cur_h,
+		fullscreen = flags and flags.fullscreen or false }
+
 	if mode then
-		love.window.setMode(mode.width, mode.height, {
-			resizable = true,
-			fullscreen = not want_windowed,
-			vsync = 1,
-			msaa = 4,
-			highdpi = true,
-		})
+		set_mode(mode.width, mode.height, not want_windowed)
 		platform.settings.width, platform.settings.height = mode.width, mode.height
 	end
 	platform.settings.windowed = want_windowed
-	require("src.engine.mod").game_call("save_settings")
+	-- Not written yet: keeping the change is what writes it. Until then the file
+	-- on disk still describes a mode known to work.
+	require("src.engine.screens").push("KeepDisplaySettings")
 	return true
 end
 

@@ -9,6 +9,7 @@
 #   tools/sweep.sh lethality     every weapon against the first enemy (30)
 #   tools/sweep.sh details       every weapon's detail screen (30)
 #   tools/sweep.sh perkdetails   every perk's detail screen (56)
+#   tools/sweep.sh keepdisplay   the three ways out of the resolution dialog (3)
 #   tools/sweep.sh modes         the six endless modes, each rule (6)
 #   tools/sweep.sh modemenu      the six endless modes, reached by clicking (6)
 #   tools/sweep.sh named         every hand-written scenario in src/test
@@ -106,7 +107,7 @@ named_scenarios() {
 	# the hand-written ones; the parameterised three are the sweeps themselves
 	for f in "$ROOT"/src/test/scenarios/*.lua; do
 		n="$(basename "$f" .lua)"
-		case "$n" in matrix | bake | mode | mode-menu | lethality | weapon-details | perk-details) ;; *) echo "$n" ;; esac
+		case "$n" in matrix | bake | mode | mode-menu | lethality | weapon-details | perk-details | keep-display) ;; *) echo "$n" ;; esac
 	done
 }
 
@@ -162,6 +163,11 @@ jobs_for() {
 			echo "perkdetails-p$p|vanilla|perk-details|CL_PERK=$p"
 		done
 		;;
+	keepdisplay)
+		for a in keep revert timeout; do
+			echo "keepdisplay-$a|vanilla|keep-display|CL_ANSWER=$a"
+		done
+		;;
 	modes)
 		for m in survival rush blitz waves nukefism weaponpicker; do
 			echo "mode-$m|vanilla|mode|CL_MODE=$m"
@@ -192,7 +198,7 @@ jobs_for() {
 
 # ---------------------------------------------------------------- the sweep
 
-[ "$SWEEP" = "all" ] && SWEEPS="named modes modemenu details perkdetails bake variety lethality variants matrix" || SWEEPS="$SWEEP"
+[ "$SWEEP" = "all" ] && SWEEPS="named modes modemenu details perkdetails keepdisplay bake variety lethality variants matrix" || SWEEPS="$SWEEP"
 
 test -x "$LOVE" || {
 	echo "LÖVE not found at $LOVE" >&2

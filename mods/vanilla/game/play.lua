@@ -3048,6 +3048,7 @@ function game.on_screen_draw(screen_name, screen)
 	require("mods.vanilla.game.gallery").draw(screen_name, screen)
 	require("mods.vanilla.game.unlocks").draw(screen_name, screen)
 	require("mods.vanilla.game.achievements").draw(screen_name, screen)
+	require("mods.vanilla.game.modeinfo").draw(screen_name, screen)
 end
 
 --- Screens the engine pushes carry no progress state of their own.

@@ -354,16 +354,39 @@ function data.load_demos()
 	loaded.demos = true
 end
 
+-- ------------------------------------------------------------ game modes
+
+-- What each endless mode is called and what it says about itself. The survival
+-- menu's layout carries a Name and a Desc textbox and an Image for the panel
+-- beside the buttons, and the C++ side filled all three from here as the
+-- pointer moved over the list.
+data.game_modes = {} -- id -> { name, desc, bm }
+
+function data.load_game_modes()
+	if loaded.game_modes then return end
+	local root = read_xml("game-modes/game-modes.xml")
+	local arr = root and xml.array(root, "GAMEMODES")
+	for _, node in ipairs(arr and arr.children or {}) do
+		local a = node.attrs
+		if a.id then
+			data.game_modes[a.id] = { name = a.name, desc = a.desc, bm = a.bm }
+		end
+	end
+	loaded.game_modes = true
+end
+
 -- ------------------------------------------------------------ chapters
 
 data.chapters = {}
 
 function data.load_chapters()
+	if loaded.chapters then return end
 	local root = read_xml("chapters.xml")
 	local arr = xml.array(root, "CHAPTERS")
 	for _, node in ipairs(arr.children) do
 		data.chapters[#data.chapters + 1] = { id = node.attrs.id, name = node.attrs.name }
 	end
+	loaded.chapters = true
 end
 
 function data.load_all()
@@ -372,6 +395,7 @@ function data.load_all()
 	data.load_variants()
 	data.load_terrains()
 	data.load_demos()
+	data.load_game_modes()
 	data.load_chapters()
 end
 

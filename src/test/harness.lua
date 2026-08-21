@@ -37,6 +37,25 @@ function harness.click(name)
 	harness.click_at(x + w / 2, y + h / 2)
 end
 
+--- Put the pointer on a named comp without pressing anything. Several panels
+-- are filled by what the pointer is over rather than by what was clicked --
+-- the galleries' details, the achievements' name and description, the survival
+-- menu's mode panel -- and none of that was reachable from a scenario before.
+function harness.hover(name)
+	local top = screens.top()
+	local comp = top and top.compmap[name]
+	if not comp then
+		print(("[test] no comp '%s' to hover on %s"):format(name, top and top.name or "?"))
+		return
+	end
+	local x, y, w, h = comps.screen_rect(comp)
+	local ww, wh = love.graphics.getDimensions()
+	local scale = math.min(ww / screens.WIDTH, wh / screens.HEIGHT)
+	local ox = (ww - screens.WIDTH * scale) / 2
+	local oy = (wh - screens.HEIGHT * scale) / 2
+	screens.mousemoved((x + w / 2) * scale + ox, (y + h / 2) * scale + oy)
+end
+
 function harness.key(k)
 	screens.keypressed(k)
 end
@@ -253,6 +272,7 @@ function harness.install(scenario_name)
 			-- {x, y} in reference coords: for screens that answer a click
 			-- anywhere rather than a click on a comp (the unlock celebrations)
 			if step.click_at then harness.click_at(step.click_at[1], step.click_at[2]) end
+			if step.hover then harness.hover(step.hover) end
 			if step.key then harness.key(step.key) end
 			if step.text then harness.text(step.text) end
 			-- escape hatch for subsystems a player cannot reach from input

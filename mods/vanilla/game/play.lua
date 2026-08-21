@@ -292,8 +292,8 @@ function game.start_quest(chapter, quest, difficulty)
 	init_session("quest", chapter, quest)
 
 	local def = quests.get(chapter, quest)
-	-- highest weapon index that may drop; grows with chapter progress
-	game.weapon_cap = math.min(30, 6 + 5 * (chapter - 1))
+	-- how far into the weapon pool drops may reach; grows with chapter progress
+	game.weapon_cap = math.min(#data.player_weapons, 6 + 5 * (chapter - 1))
 	game.kills_goal = def.kills_goal
 	game.spawn_interval = def.spawn_interval
 	game.max_concurrent = def.max_concurrent
@@ -332,10 +332,11 @@ function game.start_custom(quest)
 	game.kills_goal = nil -- the spawn list decides when it is over
 	game.diff_mul = 1
 	-- an authored quest has no chapter to gate its drops, so every weapon a
-	-- player can hold is in -- and nothing above that: `#weapon_order` is a
-	-- length over a sparse array and answers 48, which put the spider's own
-	-- plasma gun and the boss's in the drop table (see data.last_player_weapon)
-	game.weapon_cap = data.last_player_weapon
+	-- player can hold is in -- and nothing above that. The pool is a dense list
+	-- for exactly this reason: `#weapon_order` is a length over a sparse array
+	-- and answers 48, which put the spider's own plasma gun and the boss's in
+	-- the drop table (see data.player_weapons).
+	game.weapon_cap = #data.player_weapons
 	game.spawn_interval = math.huge -- the generic spawner stays out of this
 	game.max_concurrent = 0
 	game.health_mul, game.damage_mul = HEALTH_SCALE_BASE, DAMAGE_SCALE_BASE
@@ -515,7 +516,7 @@ local function update_survival_ramp(game)
 	local t = game.time * (game.mode == "blitz" and 2.5 or 1)
 	game.spawn_interval = math.max(0.3, 1.8 - t * 0.02)
 	game.max_concurrent = math.min(60, 6 + math.floor(t * 0.4))
-	game.weapon_cap = math.min(30, 6 + math.floor(t / 25))
+	game.weapon_cap = math.min(#data.player_weapons, 6 + math.floor(t / 25))
 	game.health_mul = HEALTH_SCALE_BASE * (1 + t / 90)
 	game.damage_mul = DAMAGE_SCALE_BASE * (1 + t / 180)
 	local pool = {}
@@ -672,7 +673,7 @@ end
 local function update_waves_mode(game, dt)
 	game.health_mul = HEALTH_SCALE_BASE * (1 + (game.wave - 1) * 0.12)
 	game.damage_mul = DAMAGE_SCALE_BASE * (1 + (game.wave - 1) * 0.06)
-	game.weapon_cap = math.min(30, 6 + game.wave * 2)
+	game.weapon_cap = math.min(#data.player_weapons, 6 + game.wave * 2)
 	if game.wave_queue > 0 then
 		game.wave_spawn_cd = (game.wave_spawn_cd or 0) - dt
 		if game.wave_spawn_cd <= 0 and #game.creatures < MAX_CREATURES then
@@ -718,7 +719,7 @@ local function update_field_spawns(game, dt)
 		game.drops[#game.drops + 1] = { kind = "powerup", powerup = pu, x = x, y = y, t = 0 }
 	else -- weaponpicker
 		game.field_spawn_cd = 5
-		local w = data.weapon_order[love.math.random(2, game.weapon_cap)]
+		local w = data.player_weapons[love.math.random(2, game.weapon_cap)]
 		if w then
 			game.drops[#game.drops + 1] = { kind = "weapon", weapon = w, x = x, y = y, t = 0 }
 		end
@@ -1006,7 +1007,7 @@ local function try_drop(game, x, y)
 		-- random weapon up to the current cap, never the one in hand
 		local pool = {}
 		for idx = 2, game.weapon_cap do
-			local w = data.weapon_order[idx]
+			local w = data.player_weapons[idx]
 			if w and w ~= game.player.weapon then pool[#pool + 1] = w end
 		end
 		if #pool > 0 then
@@ -1521,9 +1522,9 @@ end
 
 --- Random Weapon: "here, have this weapon. No questions asked."
 function game.give_random_weapon()
-	local order = data.weapon_order
-	local cap = math.min(#order, game.weapon_cap or #order)
-	local w = order[love.math.random(1, math.max(1, cap))]
+	local pool = data.player_weapons
+	local cap = math.min(#pool, game.weapon_cap or #pool)
+	local w = pool[love.math.random(1, math.max(1, cap))]
 	if not w then return end
 	game.player.weapon = w
 	game.player.ammo = game.clip_size()

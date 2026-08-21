@@ -191,91 +191,126 @@ local function projectile_art(id, wtype, flags)
 	return "bullet"
 end
 
+-- Weapons a mod adds, in the shape weapons.xml uses.
+--
+-- game/traits.lua has promised this since it landed -- "a mod adding its own
+-- weapons adds them the same way" -- and until now there was nowhere to put
+-- them. A cartridge appends attribute tables here at load time (before any
+-- screen exists, so before anything asks for a weapon), and they go through
+-- exactly the builder the XML rows do: same damage derivation, same spread,
+-- same family, same brass flag. A mod's weapon is not a second class of
+-- weapon.
+--
+-- Two differences from an XML row, both because a mod is not the pak:
+--   * `traits` may be given on the entry itself, so a mod ships its own verb
+--     table instead of editing vanilla's.
+--   * `index` must sit clear of the pak's own (1..32, 44..48, 63). Nothing
+--     enforces it; `data.player_weapons` is built from a list rather than an
+--     index range precisely so a gap costs nothing.
+data.weapon_overlay = {}
+
+-- Every weapon the player may be handed, densely, in the order they are
+-- offered. NOT the same as `weapon_order`, which is indexed by the file's own
+-- numbering and is sparse -- the pak jumps from 32 to 44, so `#weapon_order`
+-- is undefined behaviour that LuaJIT answers 48 to, which once put a boss's
+-- plasma gun in a custom quest's drop table (1c0941e). Anything choosing a
+-- weapon for the player walks this list; anything addressing a gallery plate
+-- still uses `weapon_order`, because the plates are in file order.
+data.player_weapons = {}
+
+--- One weapon from one row of attributes, whether the pak wrote them or a mod
+-- did. `a` is the XML node's attribute table, or a mod's equivalent.
+local function build_weapon(a)
+	local w = {
+		id = a.id,
+		index = to_num(a.index, 0),
+		name = a.name,
+		clip_size = to_num(a.clip_size, 10),
+		snd_fire = a.snd_fire,
+		snd_reload = a.snd_reload,
+		shoot_interval = to_num(a.shoot_interval, 0.5),
+		reload_time = to_num(a.reload_time, 1),
+		num_projectiles = to_num(a.num_projectiles, 1),
+		projectile_speed = to_num(a.projectile_speed, 50),
+		projectile_damage = to_num(a.projectile_damage, 1),
+		projectile_range = to_num(a.projectile_range, 300),
+		stat_damage = to_num(a.stat_damage, 0.3),
+		stat_accuracy = to_num(a.stat_accuracy, 0.3),
+		-- No default: this one is authored on a single weapon out of 31
+		-- (SPLITTER_GUN), which makes it an override rather than a dataset
+		-- -- for the gun whose nominal rate lies about it, since it fires
+		-- in bursts. nil means "nobody said", which is what the detail
+		-- screen's bar needs to know before deriving one (game/details).
+		stat_fire_rate = tonumber(a.stat_fire_rate),
+		icon = a.bm_icon and ("weapons/" .. a.bm_icon) or nil,
+		ammo_icon = a.ammo_icon,
+	}
+	-- Effective per-projectile damage. Most weapons ship
+	-- projectile_damage="1" (real DPS was computed in the C++ engine);
+	-- only a few carry hand-authored values (pistol 4.1, plasma rifle
+	-- 10, ...). Derive the rest from the stat_damage rating, calibrated
+	-- so the pistol's derived DPS matches its authored value:
+	-- pistol dps = 4.1 / 0.7117 = 5.76 at stat 0.3 -> dps = 19.2 * stat.
+	--
+	-- That derivation was per *shot interval*, which reads the weapon as
+	-- if it fired for ever: a gun that shoots twice as fast got half the
+	-- damage a shot and came out even. A magazine is what a player
+	-- actually spends, and it is not the same trade -- the flamethrower's
+	-- 30 rounds leave in a quarter of a second and then it reloads for
+	-- two, so 19.2 * stat * 0.0081 put 3.7 damage in a full magazine
+	-- where the pistol's held 49 and the minigun's 111. Landing every
+	-- round of it on one 68 hp alien would not kill it, which is what the
+	-- matrix sweep found: across 12 fights each, the three flame weapons
+	-- managed 5 kills between them off 2234 hits, where no other weapon
+	-- needed more than 33 hits for a kill.
+	--
+	-- So the rate that matters is the sustained one, reload included:
+	-- a magazine costs `clip * shoot_interval + reload_time` seconds
+	-- whatever order those go in. Calibrated on the same weapon as before
+	-- -- the pistol's authored 4.1 over a 12-round, 9.54-second cycle is
+	-- 5.16 dps at stat 0.3, so 17.2 dps per unit of stat_damage.
+	--
+	-- Still a heuristic: stat_damage is the rating the gallery draws, not
+	-- a damage coefficient, and against the nine weapons that do carry an
+	-- authored value it lands within 16.9x either way (the interval form
+	-- was 35.2x, and low by a geometric mean of 0.54 where this is 0.77).
+	-- Better calibrated, not correct -- and it leaves all nine of those
+	-- weapons exactly as authored.
+	local MAGAZINE_DPS_PER_STAT = 17.2
+	if w.projectile_damage > 1.5 then
+		w.damage_effective = w.projectile_damage
+	else
+		local cycle = w.clip_size * w.shoot_interval + w.reload_time
+		w.damage_effective = MAGAZINE_DPS_PER_STAT * w.stat_damage * cycle
+			/ math.max(1, w.clip_size) / math.max(1, w.num_projectiles)
+	end
+	w.spread = spread_of(w)
+	local flags = to_num(a.flags, 0)
+	w.proj_art = projectile_art(w.id, to_num(a.type, 0), flags)
+	-- only the two families drawn as a glowing blob have a size to set;
+	-- rockets, blades and the pulse arc are their own sprites at their own
+	-- size, and a kinetic round is a bullet
+	if w.proj_art == "plasma" or w.proj_art == "ion" then
+		w.proj_scale = bolt_scale(w.damage_effective, w.projectile_speed)
+	end
+	w.brass = math.floor(flags / BRASS_FLAG) % 2 == 1
+	-- A mod's weapon brings its own verbs with it; a pak weapon's are looked up
+	-- by id in vanilla's own overlay, which is the only place they live.
+	w.traits = a.traits or traits[w.id]
+	data.weapons[w.id] = w
+	data.weapon_order[w.index] = w
+	return w
+end
+
 function data.load_weapons()
 	if loaded.weapons then return end
 	local root = read_xml("weapons/weapons.xml")
 	local arr = xml.array(root, "WEAPONS")
 	for _, node in ipairs(arr.children) do
-		local a = node.attrs
-		local w = {
-			id = a.id,
-			index = to_num(a.index, 0),
-			name = a.name,
-			clip_size = to_num(a.clip_size, 10),
-			snd_fire = a.snd_fire,
-			snd_reload = a.snd_reload,
-			shoot_interval = to_num(a.shoot_interval, 0.5),
-			reload_time = to_num(a.reload_time, 1),
-			num_projectiles = to_num(a.num_projectiles, 1),
-			projectile_speed = to_num(a.projectile_speed, 50),
-			projectile_damage = to_num(a.projectile_damage, 1),
-			projectile_range = to_num(a.projectile_range, 300),
-			stat_damage = to_num(a.stat_damage, 0.3),
-			stat_accuracy = to_num(a.stat_accuracy, 0.3),
-			-- No default: this one is authored on a single weapon out of 31
-			-- (SPLITTER_GUN), which makes it an override rather than a dataset
-			-- -- for the gun whose nominal rate lies about it, since it fires
-			-- in bursts. nil means "nobody said", which is what the detail
-			-- screen's bar needs to know before deriving one (game/details).
-			stat_fire_rate = tonumber(a.stat_fire_rate),
-			icon = a.bm_icon and ("weapons/" .. a.bm_icon) or nil,
-			ammo_icon = a.ammo_icon,
-		}
-		-- Effective per-projectile damage. Most weapons ship
-		-- projectile_damage="1" (real DPS was computed in the C++ engine);
-		-- only a few carry hand-authored values (pistol 4.1, plasma rifle
-		-- 10, ...). Derive the rest from the stat_damage rating, calibrated
-		-- so the pistol's derived DPS matches its authored value:
-		-- pistol dps = 4.1 / 0.7117 = 5.76 at stat 0.3 -> dps = 19.2 * stat.
-		--
-		-- That derivation was per *shot interval*, which reads the weapon as
-		-- if it fired for ever: a gun that shoots twice as fast got half the
-		-- damage a shot and came out even. A magazine is what a player
-		-- actually spends, and it is not the same trade -- the flamethrower's
-		-- 30 rounds leave in a quarter of a second and then it reloads for
-		-- two, so 19.2 * stat * 0.0081 put 3.7 damage in a full magazine
-		-- where the pistol's held 49 and the minigun's 111. Landing every
-		-- round of it on one 68 hp alien would not kill it, which is what the
-		-- matrix sweep found: across 12 fights each, the three flame weapons
-		-- managed 5 kills between them off 2234 hits, where no other weapon
-		-- needed more than 33 hits for a kill.
-		--
-		-- So the rate that matters is the sustained one, reload included:
-		-- a magazine costs `clip * shoot_interval + reload_time` seconds
-		-- whatever order those go in. Calibrated on the same weapon as before
-		-- -- the pistol's authored 4.1 over a 12-round, 9.54-second cycle is
-		-- 5.16 dps at stat 0.3, so 17.2 dps per unit of stat_damage.
-		--
-		-- Still a heuristic: stat_damage is the rating the gallery draws, not
-		-- a damage coefficient, and against the nine weapons that do carry an
-		-- authored value it lands within 16.9x either way (the interval form
-		-- was 35.2x, and low by a geometric mean of 0.54 where this is 0.77).
-		-- Better calibrated, not correct -- and it leaves all nine of those
-		-- weapons exactly as authored.
-		local MAGAZINE_DPS_PER_STAT = 17.2
-		if w.projectile_damage > 1.5 then
-			w.damage_effective = w.projectile_damage
-		else
-			local cycle = w.clip_size * w.shoot_interval + w.reload_time
-			w.damage_effective = MAGAZINE_DPS_PER_STAT * w.stat_damage * cycle
-				/ math.max(1, w.clip_size) / math.max(1, w.num_projectiles)
-		end
-		w.spread = spread_of(w)
-		local flags = to_num(a.flags, 0)
-		w.proj_art = projectile_art(w.id, to_num(a.type, 0), flags)
-		-- only the two families drawn as a glowing blob have a size to set;
-		-- rockets, blades and the pulse arc are their own sprites at their own
-		-- size, and a kinetic round is a bullet
-		if w.proj_art == "plasma" or w.proj_art == "ion" then
-			w.proj_scale = bolt_scale(w.damage_effective, w.projectile_speed)
-		end
-		w.brass = math.floor(flags / BRASS_FLAG) % 2 == 1
-		w.traits = traits[w.id]
-		data.weapons[w.id] = w
-		data.weapon_order[w.index] = w
+		build_weapon(node.attrs)
 	end
 
-	-- The highest index a player may be handed, which is not the same as the
+	-- The highest index the *pak* offers a player, which is not the same as the
 	-- highest index in the file. weapons.xml runs 1..32 and then jumps to 44,
 	-- 45, 46, 47, 48, 63: creature guns (SPIDER_PLASMA, MONSTER_PLASMA), the
 	-- fire-bullets powerup, and cut content nobody ever held (BUBBLEGUN,
@@ -289,6 +324,22 @@ function data.load_weapons()
 		local w = data.weapon_order[data.last_player_weapon + 1]
 		if not (w and w.icon) then break end
 		data.last_player_weapon = data.last_player_weapon + 1
+	end
+
+	-- The pool, in the order it is offered: the pak's leading run first, then
+	-- whatever the active cartridge added. A mod's weapons land at the far end
+	-- on purpose -- `weapon_cap` grows through a run, so arriving last means
+	-- arriving late, which is what a new arsenal should feel like.
+	--
+	-- Emptied first, not appended to: `loaded.weapons` is set at the very end so
+	-- that a parse that throws part-way is retried, and a retry that appended
+	-- would hand the player the cartridge's arsenal twice.
+	for i = #data.player_weapons, 1, -1 do data.player_weapons[i] = nil end
+	for i = 1, data.last_player_weapon do
+		data.player_weapons[i] = data.weapon_order[i]
+	end
+	for _, a in ipairs(data.weapon_overlay) do
+		data.player_weapons[#data.player_weapons + 1] = build_weapon(a)
 	end
 
 	loaded.weapons = true

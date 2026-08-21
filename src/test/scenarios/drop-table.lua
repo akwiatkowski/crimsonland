@@ -8,26 +8,28 @@
 -- 63 UNKNOWN. Those are what creatures shoot with, what the fire-bullets
 -- powerup swaps in, and cut content; the last five have no icon at all.
 --
--- play.lua picks a drop by rolling an index from 2 to game.weapon_cap, so the
--- cap is the only thing keeping cut content and creature guns out of the
--- player's hands. Three of the four sites cap at 30 by hand; the custom-quest
--- one caps at `#data.weapon_order`, which is a length taken over a sparse
--- table -- undefined by the language, and whatever it answers is not 31.
+-- play.lua picks a drop by walking `data.player_weapons` from 2 to
+-- game.weapon_cap. That pool is built as the leading run of indices carrying an
+-- icon plus whatever the active cartridge added, which is what keeps creature
+-- guns and cut content out of it structurally rather than by arithmetic. The
+-- arithmetic is what failed before: the custom-quest site capped at
+-- `#data.weapon_order`, a length taken over a sparse table -- undefined by the
+-- language, and whatever it answers is not 31.
 --
--- So this asserts the invariant rather than the arithmetic: whatever the cap
--- is, every index the drop roll can reach must be a weapon with an icon. A
--- weapon with no icon is drawn as an empty pickup and carried as an empty HUD
--- slot -- assets.image(nil) returns nil and every draw site checks, so it is
--- not a crash, which is exactly why nothing has noticed.
+-- So this asserts the invariant rather than the numbers: whatever the cap is,
+-- every slot the drop roll can reach must exist and must be a weapon with an
+-- icon. A weapon with no icon is drawn as an empty pickup and carried as an
+-- empty HUD slot -- assets.image(nil) returns nil and every draw site checks,
+-- so it is not a crash, which is exactly why nothing had noticed.
+--
+-- Deliberately no upper bound on the cap written down here: a mod may extend
+-- the pool (data.weapon_overlay), and a test that hardcoded 31 would report a
+-- cartridge's own arsenal as cut content.
 
 local data = require("mods.vanilla.game.data")
 local customquests = require("mods.vanilla.game.customquests")
 local play = require("mods.vanilla.game.play")
 local timeline = require("src.engine.timeline")
-
--- The last player weapon in weapons.xml. Everything above it is a creature
--- weapon, a powerup or cut content.
-local LAST_PLAYER_WEAPON = 31
 
 local function candidates()
 	local bad = {}
@@ -35,9 +37,11 @@ local function candidates()
 	-- weaponpicker field spawn) -- read the cap off the live game rather than
 	-- recomputing it, so the test follows the game and not a copy of it
 	for idx = 2, (play.weapon_cap or 0) do
-		local w = data.weapon_order[idx]
-		if w and (not w.icon or idx > LAST_PLAYER_WEAPON) then
-			bad[#bad + 1] = ("%d=%s%s"):format(idx, w.id, w.icon and "" or " (no icon)")
+		local w = data.player_weapons[idx]
+		if not w then
+			bad[#bad + 1] = ("%d=(empty slot)"):format(idx)
+		elseif not w.icon then
+			bad[#bad + 1] = ("%d=%s (no icon)"):format(idx, w.id)
 		end
 	end
 	return bad

@@ -813,11 +813,187 @@ local function update_custom_quest_hover(screen)
 	if q then set_custom_quest_details(screen, q) end
 end
 
+-- ------------------------------------------------------------ firing
+--
+-- One pull of the trigger, in three pieces: what the shot is worth, how a
+-- single round is put into the world, and what pulling the trigger costs.
+--
+-- They are separate because a cartridge may own the middle piece. `mods/`
+-- weapons exist whose delivery vanilla's firing code cannot express -- a
+-- grenade that travels to the cursor *point*, a rail that fires from a planted
+-- anchor rather than from the player -- and the alternative to a seam here was
+-- a mod forking three thousand lines to change nine.
+
+-- How far from the trooper's centre a round appears, and where the case is
+-- thrown from. Both are the pak's own art: the muzzle sits about there on
+-- every gun in it.
+local MUZZLE_OFFSET = 20
+local BRASS_OFFSET = 14
+
+--- What one pull of the trigger is worth.
+--
+-- Everything here is per-*shot* -- the perk multipliers, the class
+-- multipliers, the motor, the reach -- so a pellet gun's twelve pellets share
+-- one of these and differ only in where they went. That is also why it is a
+-- table rather than a dozen locals: a cartridge that owns delivery gets the
+-- numbers vanilla would have used, instead of re-deriving Living Fortress.
+local function shot_of(game, p, w, damage_mul)
+	-- flame weapons are short-ranged sprays; everything else uses the XML
+	-- range (rockets detonate when they run out)
+	local range = w.projectile_range * RANGE_SCALE
+	if FLAME[w.id] then range = range * 0.18 end
+	-- Pyromaniac and Ion Gun Master are per-class: they only touch the weapons
+	-- their text names, so the class tables decide who benefits
+	local class_dmg, class_range = 1, 1
+	if FLAME[w.id] or PLASMA[w.id] then
+		class_dmg, class_range = game.mods.fire_dmg, game.mods.fire_range
+	elseif ION[w.id] then
+		class_dmg = game.mods.ion_dmg
+	end
+	range = range * class_range
+	-- Slow Time, High Damage pays off only while Reflex is running
+	local reflex_dmg = game.effects.REFLEX_BOOST and game.mods.reflex_dmg or 1
+	-- Living Fortress: "you do more damage ... the longer you stand still"
+	local stand_dmg = 1 + game.mods.stand_ramp * ((p.still_t or 0) / RAMP_FULL)
+	-- Barrel Greaser: "more speed, more damage". A round with a motor leaves
+	-- the barrel below that and builds up to it, so a rocket launch is
+	-- something you watch happen (game/traits.lua).
+	local rated = w.projectile_speed * BULLET_SPEED_SCALE * game.mods.bullet_speed
+	local accel = w.traits and w.traits.accel
+	return {
+		weapon = w,
+		x = p.x + math.cos(p.angle) * MUZZLE_OFFSET,
+		y = p.y + math.sin(p.angle) * MUZZLE_OFFSET,
+		angle = p.angle,
+		spread = w.spread,
+		speed = accel and rated * accel.from or rated,
+		accel = accel and accel.rate or nil,
+		max_speed = rated,
+		range = range,
+		damage = w.damage_effective * game.mods.dmg
+			* class_dmg * reflex_dmg * stand_dmg
+			* (game.effects.FIRE_BULLETS and 2 or 1)
+			* (damage_mul or 1),
+		explosive = w.traits and w.traits.blast or nil,
+		flame = FLAME[w.id] or nil,
+		fire = game.effects.FIRE_BULLETS and true or nil,
+		art = w.proj_art,
+		bolt = w.proj_scale,
+		weapon_id = w.id,
+		traits = w.traits,
+	}
+end
+
+--- Put one round into the world along `angle`, built from a shot. `opts` keys
+-- are round fields, applied over the defaults -- so a delivery changes where
+-- the round starts or what it carries without restating the other ten.
+-- Returns the round, for a delivery that wants to keep hold of it.
+function game.spawn_round(shot, angle, opts)
+	local range = shot.range
+	-- a flamethrower's tongue is ragged: each puff reaches a different distance
+	if shot.flame then range = range * (0.6 + love.math.random() * 0.4) end
+	local b = {
+		x = shot.x,
+		y = shot.y,
+		dx = math.cos(angle),
+		dy = math.sin(angle),
+		speed = shot.speed,
+		accel = shot.accel,
+		max_speed = shot.max_speed,
+		dist_left = range,
+		damage = shot.damage,
+		explosive = shot.explosive,
+		flame = shot.flame,
+		fire = shot.fire,
+		-- which sprite off game/projs.tga this round wears, and the gun it
+		-- left, which is the only way to tell a gauss round from any other
+		-- kinetic one
+		art = shot.art,
+		-- how big this gun's bolt is drawn, for the energy families that are
+		-- drawn as one (nil for everything else)
+		bolt = shot.bolt,
+		weapon_id = shot.weapon_id,
+		-- what this round *does*: see game/traits.lua
+		traits = shot.traits,
+	}
+	if opts then
+		for k, v in pairs(opts) do b[k] = v end
+	end
+	game.bullets[#game.bullets + 1] = b
+	return b
+end
+
+--- Pull the trigger once: spend the round, make the noise, put the shot in the
+-- air. `opts.ammo_cost` is what it takes out of the clip (a secondary costs
+-- more than one), `opts.damage_mul` scales the whole shot (a charged one is
+-- worth more), and `opts.deliver` replaces the weapon's own delivery for this
+-- shot only (which is what a family's alt-fire is).
+local function fire_shot(game, p, opts)
+	opts = opts or {}
+	local w = p.weapon
+	local cost = opts.ammo_cost or 1
+	-- Regression Ammo and Ammunition Within both fire on an empty clip; they
+	-- differ only in what the shot costs you.
+	local dry = p.ammo < cost
+	if dry and not game.mods.empty_fire then
+		p.reloading = w.reload_time * game.mods.reload
+		p.reload_total = p.reloading
+		audio.play_sound(w.snd_reload)
+		return
+	end
+	if dry then
+		if game.mods.empty_fire == "health" then
+			p.hp = p.hp - EMPTY_FIRE_HP
+		else
+			game.score = math.max(0, game.score - EMPTY_FIRE_POINTS)
+		end
+	end
+	p.cooldown = w.shoot_interval / game.mods.fire
+	p.ammo = math.max(0, p.ammo - cost)
+	p.muzzle = 0.05
+	audio.play_sound(w.snd_fire, 1, 0, 1 + (love.math.random() - 0.5) / 6)
+	-- Brass, on the original's own emitter parameters and shell art -- but only
+	-- from the weapons that have a case to eject. weapons.xml says which in bit
+	-- 0 of `flags` (data.lua), and firing it unconditionally had the
+	-- flamethrower, the blade gun and the bubblegun all dropping shells.
+	if w.brass then
+		fx.spawn("fxs/shells1.lua", p.x + math.cos(p.angle) * BRASS_OFFSET,
+			p.y + math.sin(p.angle) * BRASS_OFFSET, math.deg(p.angle),
+			{ layer = "world", fade = 0.25 })
+	end
+	game.shots = game.shots + 1
+	game.weapon_shots[w.id] = (game.weapon_shots[w.id] or 0) + 1
+
+	local shot = shot_of(game, p, w, opts.damage_mul)
+	local deliver = opts.deliver or (w.traits and w.traits.deliver)
+	if deliver then
+		deliver(game, p, shot)
+		return
+	end
+	for _ = 1, w.num_projectiles do
+		-- somewhere in the cone this gun's accuracy rating earns it
+		-- (game/data.lua), which for a pellet gun is where the fan comes from
+		-- and for a rifle is a barely visible wander
+		game.spawn_round(shot,
+			shot.angle + (love.math.random() - 0.5) * 2 * shot.spread)
+	end
+end
+
+--- Pull the trigger from outside: what a `traits.trigger` calls once it has
+-- decided the gun goes off, and what a cartridge's alt-fire calls.
+function game.fire_shot(opts)
+	if game.player and game.player.weapon then fire_shot(game, game.player, opts) end
+end
+
 -- ------------------------------------------------------------ update
 
 local function update_player(game, dt)
 	local p = game.player
 	local want = input.intent(game, dt)
+	-- The frame's intent, where a hook can read it. Polling the controller a
+	-- second time is not the same thing: an AI's controller carries state and
+	-- would be stepped twice.
+	game.intent = want
 	local dx, dy = want.dx, want.dy
 	p.moving = (dx ~= 0 or dy ~= 0)
 
@@ -893,95 +1069,18 @@ local function update_player(game, dt)
 		end
 	end
 
-	if want.fire and p.reloading <= 0 and p.cooldown <= 0 then
-		-- Regression Ammo and Ammunition Within both fire on an empty clip;
-		-- they differ only in what the shot costs you.
-		local dry = p.ammo <= 0
-		if dry and not game.mods.empty_fire then
-			p.reloading = p.weapon.reload_time * game.mods.reload
-			p.reload_total = p.reloading
-			audio.play_sound(p.weapon.snd_reload)
-		else
-			if dry then
-				if game.mods.empty_fire == "health" then
-					p.hp = p.hp - EMPTY_FIRE_HP
-				else
-					game.score = math.max(0, game.score - EMPTY_FIRE_POINTS)
-				end
-			end
-			p.cooldown = p.weapon.shoot_interval / game.mods.fire
-			p.ammo = math.max(0, p.ammo - 1)
-			p.muzzle = 0.05
-			audio.play_sound(p.weapon.snd_fire, 1, 0, 1 + (love.math.random() - 0.5) / 6)
-			-- Brass, on the original's own emitter parameters and shell art --
-			-- but only from the weapons that have a case to eject. weapons.xml
-			-- says which in bit 0 of `flags` (data.lua), and firing it
-			-- unconditionally had the flamethrower, the blade gun and the
-			-- bubblegun all dropping shells.
-			if p.weapon.brass then
-				fx.spawn("fxs/shells1.lua", p.x + math.cos(p.angle) * 14,
-					p.y + math.sin(p.angle) * 14, math.deg(p.angle),
-					{ layer = "world", fade = 0.25 })
-			end
-			local w = p.weapon
-			game.shots = game.shots + 1
-			game.weapon_shots[w.id] = (game.weapon_shots[w.id] or 0) + 1
-			-- flame weapons are short-ranged sprays; everything else uses
-			-- the XML range (rockets detonate when they run out)
-			local range = w.projectile_range * RANGE_SCALE
-			if FLAME[w.id] then range = range * 0.18 end
-			-- Pyromaniac and Ion Gun Master are per-class: they only touch the
-			-- weapons their text names, so the class tables decide who benefits
-			local class_dmg, class_range = 1, 1
-			if FLAME[w.id] or PLASMA[w.id] then
-				class_dmg, class_range = game.mods.fire_dmg, game.mods.fire_range
-			elseif ION[w.id] then
-				class_dmg = game.mods.ion_dmg
-			end
-			range = range * class_range
-			-- Slow Time, High Damage pays off only while Reflex is running
-			local reflex_dmg = game.effects.REFLEX_BOOST and game.mods.reflex_dmg or 1
-			-- Living Fortress: "you do more damage ... the longer you stand still"
-			local stand_dmg = 1 + game.mods.stand_ramp * ((p.still_t or 0) / RAMP_FULL)
-			-- Barrel Greaser: "more speed, more damage". A round with a motor
-			-- leaves the barrel below that and builds up to it, so a rocket
-			-- launch is something you watch happen (game/traits.lua).
-			local rated = w.projectile_speed * BULLET_SPEED_SCALE * game.mods.bullet_speed
-			local accel = w.traits and w.traits.accel
-			local launch = accel and rated * accel.from or rated
-			for _ = 1, w.num_projectiles do
-				-- somewhere in the cone this gun's accuracy rating earns it
-				-- (game/data.lua), which for a pellet gun is where the fan
-				-- comes from and for a rifle is a barely visible wander
-				local a = p.angle + (love.math.random() - 0.5) * 2 * w.spread
-				game.bullets[#game.bullets + 1] = {
-					x = p.x + math.cos(p.angle) * 20,
-					y = p.y + math.sin(p.angle) * 20,
-					dx = math.cos(a),
-					dy = math.sin(a),
-					speed = launch,
-					accel = accel and accel.rate or nil,
-					max_speed = rated,
-					dist_left = range * (FLAME[w.id] and (0.6 + love.math.random() * 0.4) or 1),
-					damage = w.damage_effective * game.mods.dmg
-						* class_dmg * reflex_dmg * stand_dmg
-						* (game.effects.FIRE_BULLETS and 2 or 1),
-					explosive = w.traits and w.traits.blast or nil,
-					flame = FLAME[w.id] or nil,
-					fire = game.effects.FIRE_BULLETS and true or nil,
-					-- which sprite off game/projs.tga this round wears, and the
-					-- gun it left, which is the only way to tell a gauss round
-					-- from any other kinetic one
-					art = w.proj_art,
-					-- how big this gun's bolt is drawn, for the energy
-					-- families that are drawn as one (nil for everything else)
-					bolt = w.proj_scale,
-					weapon_id = w.id,
-					-- what this round *does*: see game/traits.lua
-					traits = w.traits,
-				}
-			end
-		end
+	-- Who decides the gun goes off.
+	--
+	-- Default: the trigger is down and the weapon is ready, which is every gun
+	-- the pak ships. A weapon whose trait table carries `trigger` decides for
+	-- itself, and is handed the same intent and delta -- hold-to-charge and
+	-- drain-while-held cannot be expressed as "the trigger is down", because
+	-- for those weapons the interesting moment is the release.
+	local tr = p.weapon.traits
+	if tr and tr.trigger then
+		tr.trigger(game, p, want, dt)
+	elseif want.fire and p.reloading <= 0 and p.cooldown <= 0 then
+		fire_shot(game, p)
 	end
 end
 
@@ -1173,6 +1272,16 @@ function damage_creature(game, c, dmg)
 		return true
 	end
 	return false
+end
+
+--- Hurt a creature from outside this file. Returns true if that killed it.
+--
+-- The scoring, the drop roll, the gibs and the overkill test all live in
+-- there, so a cartridge that damages a creature any other way -- an acid pool,
+-- an arc off a stuck node -- would otherwise be a kill the game does not
+-- notice. `game.explode_at` has always been the same idea for a blast.
+function game.damage_creature(c, dmg)
+	return damage_creature(game, c, dmg)
 end
 
 -- ------------------------------------------------------------------ impact
@@ -2212,6 +2321,13 @@ function game.update(dt)
 	update_impact(game, dt)
 	flush_decals(game)
 
+	-- A cartridge's own systems, ticked with the session's own clock: paused
+	-- under a UI screen, stopped at the outcome, stepped by the same dt the
+	-- autotest's fixed timestep hands everything else. Placed here and not at
+	-- the end because a level-up returns early, and a mod's world should not
+	-- skip the frame you earned a perk on. `nil` in vanilla.
+	if game.on_update then game.on_update(dt) end
+
 	-- boss entrance at 60% of the kill goal
 	if game.boss_pending > 0 and game.kills_goal
 		and game.kills >= game.kills_goal * 0.6 then
@@ -2916,6 +3032,13 @@ function game.draw()
 
 	hud.draw_shield(game, game.player.x, game.player.y)
 	hud.draw_levelup_ring(game, game.player.x, game.player.y)
+
+	-- A cartridge's own world: arcs, pools, lobbed ordnance, a tether line.
+	-- Here rather than around game.draw() because a layer that wrapped the
+	-- whole call would be drawing in screen space and over the HUD. `nil` in
+	-- vanilla; `input.controller` is the same shape of seam.
+	if game.on_world_draw then game.on_world_draw() end
+
 	-- inside the camera transform: brass, blood, fire and smoke on the ground
 	fx.draw("world")
 

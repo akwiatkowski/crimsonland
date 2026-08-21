@@ -7,6 +7,7 @@
 #   tools/sweep.sh bake          7 chapters x 10 quests of ground (70)
 #   tools/sweep.sh variety       each chapter's ten grounds, compared (7)
 #   tools/sweep.sh lethality     every weapon against the first enemy (30)
+#   tools/sweep.sh enhanced      the enhanced cartridge's own arsenal (16)
 #   tools/sweep.sh details       every weapon's detail screen (30)
 #   tools/sweep.sh perkdetails   every perk's detail screen (56)
 #   tools/sweep.sh keepdisplay   the three ways out of the resolution dialog (3)
@@ -97,6 +98,14 @@ creature_variants() {
 		sed 's/<node id="//;s/"//' | sort -u
 }
 
+enhanced_weapons() {
+	# Read out of the cartridge's own table for the same reason every other
+	# list here is read out of vendor/assets: a sweep with the ids written into
+	# it stops covering the seventeenth weapon the day one is added.
+	grep -oE '^\t\tid = "[A-Z_0-9]+"' "$ROOT/mods/enhanced/weapons.lua" |
+		sed 's/.*id = "//;s/"//'
+}
+
 chapters() {
 	# NUM_CHAPTERS, from the game rather than from memory
 	grep -oE "local NUM_CHAPTERS = [0-9]+" "$ROOT/mods/vanilla/game/play.lua" |
@@ -107,7 +116,7 @@ named_scenarios() {
 	# the hand-written ones; the parameterised three are the sweeps themselves
 	for f in "$ROOT"/src/test/scenarios/*.lua; do
 		n="$(basename "$f" .lua)"
-		case "$n" in matrix | bake | mode | mode-menu | lethality | weapon-details | perk-details | keep-display) ;; *) echo "$n" ;; esac
+		case "$n" in matrix | bake | mode | mode-menu | lethality | enhanced-lethality | weapon-details | perk-details | keep-display) ;; *) echo "$n" ;; esac
 	done
 }
 
@@ -149,6 +158,13 @@ jobs_for() {
 			echo "lethal-w$w|allweapons|lethality|CL_WEAPON=$w"
 		done
 		;;
+	enhanced)
+		# the same claim the lethality sweep makes of the pak's thirty, against
+		# sixteen weapons whose damage no human has yet felt
+		for w in $(enhanced_weapons); do
+			echo "enhanced-$w|enhanced|enhanced-lethality|CL_WEAPON=$w"
+		done
+		;;
 	details)
 		# every plate the grid has: the layout stores the assault rifle's own
 		# values as its placeholders, so a screen that was never filled still
@@ -188,6 +204,7 @@ jobs_for() {
 			case "$s" in
 			td-*) echo "named-$s|towerdefence|$s|CL_NAMED=1" ;;
 			allweapons-*) echo "named-$s|allweapons|$s|CL_NAMED=1" ;;
+			enhanced-*) echo "named-$s|enhanced|$s|CL_NAMED=1" ;;
 			*) echo "named-$s|vanilla|$s|CL_NAMED=1" ;;
 			esac
 		done
@@ -198,7 +215,7 @@ jobs_for() {
 
 # ---------------------------------------------------------------- the sweep
 
-[ "$SWEEP" = "all" ] && SWEEPS="named modes modemenu details perkdetails keepdisplay bake variety lethality variants matrix" || SWEEPS="$SWEEP"
+[ "$SWEEP" = "all" ] && SWEEPS="named modes modemenu details perkdetails keepdisplay enhanced bake variety lethality variants matrix" || SWEEPS="$SWEEP"
 
 test -x "$LOVE" || {
 	echo "LÖVE not found at $LOVE" >&2

@@ -7,6 +7,7 @@
 #   tools/sweep.sh bake          7 chapters x 10 quests of ground (70)
 #   tools/sweep.sh variety       each chapter's ten grounds, compared (7)
 #   tools/sweep.sh lethality     every weapon against the first enemy (30)
+#   tools/sweep.sh details       every weapon's detail screen (30)
 #   tools/sweep.sh modes         the six endless modes, each rule (6)
 #   tools/sweep.sh modemenu      the six endless modes, reached by clicking (6)
 #   tools/sweep.sh named         every hand-written scenario in src/test
@@ -104,7 +105,7 @@ named_scenarios() {
 	# the hand-written ones; the parameterised three are the sweeps themselves
 	for f in "$ROOT"/src/test/scenarios/*.lua; do
 		n="$(basename "$f" .lua)"
-		case "$n" in matrix | bake | mode | mode-menu | lethality) ;; *) echo "$n" ;; esac
+		case "$n" in matrix | bake | mode | mode-menu | lethality | weapon-details) ;; *) echo "$n" ;; esac
 	done
 }
 
@@ -146,6 +147,14 @@ jobs_for() {
 			echo "lethal-w$w|allweapons|lethality|CL_WEAPON=$w"
 		done
 		;;
+	details)
+		# every plate the grid has: the layout stores the assault rifle's own
+		# values as its placeholders, so a screen that was never filled still
+		# passes for slot 2 and fails for the other 29
+		for w in $(weapon_slots); do
+			echo "details-w$w|vanilla|weapon-details|CL_WEAPON=$w"
+		done
+		;;
 	modes)
 		for m in survival rush blitz waves nukefism weaponpicker; do
 			echo "mode-$m|vanilla|mode|CL_MODE=$m"
@@ -176,7 +185,7 @@ jobs_for() {
 
 # ---------------------------------------------------------------- the sweep
 
-[ "$SWEEP" = "all" ] && SWEEPS="named modes modemenu bake variety lethality variants matrix" || SWEEPS="$SWEEP"
+[ "$SWEEP" = "all" ] && SWEEPS="named modes modemenu details bake variety lethality variants matrix" || SWEEPS="$SWEEP"
 
 test -x "$LOVE" || {
 	echo "LÖVE not found at $LOVE" >&2

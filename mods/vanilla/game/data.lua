@@ -212,6 +212,12 @@ function data.load_weapons()
 			projectile_range = to_num(a.projectile_range, 300),
 			stat_damage = to_num(a.stat_damage, 0.3),
 			stat_accuracy = to_num(a.stat_accuracy, 0.3),
+			-- No default: this one is authored on a single weapon out of 31
+			-- (SPLITTER_GUN), which makes it an override rather than a dataset
+			-- -- for the gun whose nominal rate lies about it, since it fires
+			-- in bursts. nil means "nobody said", which is what the detail
+			-- screen's bar needs to know before deriving one (game/details).
+			stat_fire_rate = tonumber(a.stat_fire_rate),
 			icon = a.bm_icon and ("weapons/" .. a.bm_icon) or nil,
 			ammo_icon = a.ammo_icon,
 		}

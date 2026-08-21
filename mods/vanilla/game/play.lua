@@ -3085,6 +3085,7 @@ function game.on_screen_enter(screen_name, screen)
 	require("mods.vanilla.game.gallery").prepare(screen_name, screen)
 	require("mods.vanilla.game.unlocks").prepare(screen_name, screen)
 	require("mods.vanilla.game.achievements").prepare(screen_name, screen)
+	require("mods.vanilla.game.details").prepare(screen_name, screen)
 	require("mods.vanilla.game.display").prepare(screen_name, screen)
 	if screen_name == "MainMenu" then
 		-- reaching the menu with nothing running means attract mode
@@ -3244,6 +3245,20 @@ function game.on_ui_click(screen_name, comp_name)
 			return true
 		elseif comp_name == "PlayMenu" then
 			game.to_main_menu()
+			return true
+		end
+	elseif screen_name == "Weapons" then
+		-- The grid's plates had nothing to answer a click with. The pak ships
+		-- ui/weapon-details.lua for exactly this, and the plate index is what
+		-- it needs: the screen carries it on its parm (game/details.lua).
+		local slot = comp_name:match("^Weapon_(%d+)$")
+		local entry = slot and require("mods.vanilla.game.gallery")
+			.entry_at("weapon", tonumber(slot))
+		-- an empty slot in the data, or something not met yet: the plate is a
+		-- lock, and a lock has nothing to show
+		if entry and entry.icon
+			and require("mods.vanilla.game.gallery").seen("weapon", entry) then
+			require("src.engine.screens").push("WeaponDetails", tonumber(slot))
 			return true
 		end
 	end

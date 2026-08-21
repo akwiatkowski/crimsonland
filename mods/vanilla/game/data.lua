@@ -287,6 +287,13 @@ function data.load_variants()
 			r = to_num(a.color_base_r, 1),
 			g = to_num(a.color_base_g, 1),
 			b = to_num(a.color_base_b, 1),
+			-- Every variant carries a base alpha and five of them mean it:
+			-- Variant_23 and Variant_24 are 5 hp aliens at 0.05 and 0.04, which
+			-- is a wisp you are meant to have trouble seeing, and Variant_78 is
+			-- a 1800 hp crabfly at 0.25. The other 97 are 1, so reading this
+			-- changes nothing for them and everything for those.
+			-- (`alpha`, not `a`: `a` is the attribute table two lines up.)
+			alpha = to_num(a.color_base_a, 1),
 			-- ranged attackers (e.g. SpiderPlasmaShooter) carry a weapon ref
 			weapon_id = a.weapon_id,
 			fire_interval = to_num(a.weapon_fire_interval, 1),

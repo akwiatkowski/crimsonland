@@ -2414,7 +2414,12 @@ local function draw_creature(game, c)
 
 	local tr, tg, tb = state_tint(game, c)
 	if not tr then tr, tg, tb = v.r, v.g, v.b end
-	love.graphics.setColor(tr, tg, tb, 1)
+	-- The variant's own alpha (creature-variants.xml color_base_a). A frozen or
+	-- burning creature keeps it: the state tint says what colour it is, not how
+	-- solid, and a wisp that froze should still be a wisp. The hit flash below
+	-- deliberately does not -- being told you connected is worth more than the
+	-- half-frame of visibility it costs.
+	love.graphics.setColor(tr, tg, tb, v.alpha or 1)
 
 	if not seq then
 		love.graphics.circle("fill", c.x, c.y, 14 * c.scale)

@@ -10,7 +10,15 @@
 --
 --   { dx, dy,          movement axes, unnormalized (-1..1)
 --     aim_x, aim_y,    aim point in WORLD coordinates
---     fire, reload }   held, not edge-triggered — same as the keys they replace
+--     fire, reload,    held, not edge-triggered — same as the keys they replace
+--     alt_fire }       the second trigger, likewise held
+--
+-- `alt_fire` is the right mouse button, which no vanilla weapon reads: the
+-- original had one trigger and this port keeps it. It is here because the
+-- intent table is the only place a controller can express anything at all, so
+-- a cartridge that gives a weapon family a secondary needs the button to
+-- arrive through the same door as the first one — and needs an AI or a test to
+-- be able to press it, which polling love.mouse from the mod would not allow.
 
 local input = {}
 
@@ -34,6 +42,7 @@ local function human(game, dt)
 		aim_x = rx + camx,
 		aim_y = ry + camy,
 		fire = love.mouse.isDown(1),
+		alt_fire = love.mouse.isDown(2),
 		reload = love.keyboard.isDown("r"),
 	}
 end

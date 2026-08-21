@@ -148,7 +148,11 @@ make test      # scripted autotest (SCENARIO=quest-smoke): ASCII captures to
 Both take `MOD=<name>` to pick a cartridge from `mods/` (default `vanilla`):
 `make run MOD=allweapons` opens every chapter and asks which weapon to start
 with, and `make run MOD=enhanced` is the base game with sixteen more weapons in
-the pool and a secondary on the right mouse button. Each mod keeps its own
+the pool and a secondary on the right mouse button. `make pick` is that
+cartridge with its picker on — every chapter open and a weapon chosen off the
+grids before each run, which is how you try one of the sixteen without playing
+towards it (they sit at the far end of the drop pool on purpose, so survival
+needs seventeen minutes to reach the last of them). Each mod keeps its own
 profile — progress, achievements, statistics and
 settings — under `~/Library/Application Support/Crimsonland/mods/<name>/`, so
 playing a debug cartridge cannot unlock anything in the base game.
@@ -160,8 +164,8 @@ plays, so weapons/hits/drops are exercised), `survival-smoke`, `rush-smoke`,
 `emitter-smoke`, `editbox-smoke`, `perks-smoke`, `custom-smoke`,
 `allweapons-smoke` and `allweapons-bolts` (need `MOD=allweapons`),
 `terrain-smoke`, `gore-smoke`, `impact-smoke`, `traits-smoke`,
-`enhanced-arsenal` and `enhanced-verbs` (need `MOD=enhanced`), plus the `td-*`
-set (needs `MOD=towerdefence`).
+`enhanced-arsenal`, `enhanced-verbs` and `enhanced-pick` (need `MOD=enhanced`),
+plus the `td-*` set (needs `MOD=towerdefence`).
 
 Data invariants, which assert rather than only avoid crashing: `drop-table`
 (every index a weapon drop can reach is a weapon a player can hold),
@@ -208,7 +212,7 @@ tabulates. An axis is a parameterised scenario crossed with a list read out of
 | `details`    | every weapon's detail screen                  |   30 | 40–50 s   |
 | `enhanced`   | the enhanced cartridge's own arsenal          |   16 | ~25 s     |
 | `lethality`  | every weapon against the first enemy          |   30 | ~40 s     |
-| `named`      | every hand-written scenario                   |   35 | ~110 s    |
+| `named`      | every hand-written scenario                   |   36 | ~115 s    |
 | `perkdetails`| every perk's detail screen                    |   56 | ~96 s     |
 | `bake`       | 7 chapters × 10 quests of ground              |   70 | ~60 s     |
 | `variants`   | all 102 creature variants                     |  102 | 65–120 s  |

@@ -38,9 +38,11 @@ end
 local altfire = require("mods.enhanced.altfire")
 local arsenal = require("mods.enhanced.arsenal")
 local combat = require("mods.enhanced.combat")
+local picker = require("mods.enhanced.picker")
 local play = require("mods.vanilla.game.play")
 
 arsenal.install()
+picker.install() -- no-op unless CL_PICK is set
 
 -- A run's own world. The session clock going backwards is what says a new run
 -- started: cheaper than wrapping the six `start_*` functions, and it cannot be
@@ -69,6 +71,8 @@ local game = setmetatable({}, { __index = play })
 function game.on_screen_enter(screen_name, screen)
 	play.on_screen_enter(screen_name, screen)
 	arsenal.on_screen_enter(screen_name, screen)
+	-- last: it retitles a grid the two above have just filled
+	picker.on_screen_enter(screen_name, screen)
 end
 
 function game.on_screen_draw(screen_name, screen)
@@ -77,6 +81,9 @@ function game.on_screen_draw(screen_name, screen)
 end
 
 function game.on_ui_click(screen_name, comp_name)
+	-- picker first: it is choosing off grids the arsenal screen otherwise owns
+	-- every click on, and it is a no-op entirely unless CL_PICK is set
+	if picker.on_ui_click(screen_name, comp_name) then return true end
 	if arsenal.on_ui_click(screen_name, comp_name) then return true end
 	return play.on_ui_click(screen_name, comp_name)
 end

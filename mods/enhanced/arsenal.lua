@@ -43,11 +43,11 @@ local F_MEDIUM = "fonts/medium.mft"
 local LOCK_ICON = "ui/gfx/lock-small.png"
 
 -- The pak's own grid geometry, read off ui/weapons.lua rather than invented:
--- six columns at these fractions of the aligner, rows a fifth apart. Sixteen
--- weapons fill three rows less two.
+-- six columns at these fractions of the aligner, rows a fifth apart. The grid
+-- is centred on the panel, which for a full thirty comes out at the pak's own
+-- five rows and for sixteen puts three in the middle.
 local COLUMNS = { -0.416667, -0.25, -0.0833333, 0.0833333, 0.25, 0.416667 }
 local ROW_STEP = 0.2
-local FIRST_ROW = -0.4
 
 -- One line each, in the player's terms rather than the code's: what holding it
 -- makes you do differently. A stat line is already on the plate's tooltip in
@@ -97,8 +97,10 @@ local function entries()
 	return list
 end
 
---- Which of the sixteen a plate shows, or nil.
-local function entry_at(index)
+--- Which of the sixteen a plate shows, or nil. Public because the picker
+-- reads the same grid this screen draws: two answers to "what is plate 9" is
+-- one answer too many.
+function arsenal.entry_at(index)
 	return entries()[index]
 end
 
@@ -145,6 +147,27 @@ local function link_parents(screen)
 	end
 end
 
+--- The panel slides in and the fader darkens what is behind it, which is what
+-- every screen the pak ships does through `DoPanelTransition` in
+-- ui/common-ui-funcs.lua. The arithmetic is that function's, minus the depth
+-- term (nothing stacks on top of this one) -- reimplemented rather than
+-- included because those helpers are defined per screen by `LuaInclude`, and
+-- borrowing six lines is cheaper than borrowing a loading convention.
+--
+-- Without it the panel sits at the alpha it was built with and the fader never
+-- darkens, which is only half the problem; see `unpin` below for the other.
+local function transition(screen)
+	return function()
+		local trans = math.sin(0.5 * math.pi * screen.phase)
+		local fader, panel = screen.compmap.fader, screen.compmap.panel
+		if fader then comps.set(fader, "alpha", { math.min(1, 2 * trans) }) end
+		if panel then
+			comps.set(panel, "alpha", { trans })
+			comps.set(panel, "position_offset.x", { -(1 - trans) * 0.75 })
+		end
+	end
+end
+
 screens.register_internal(SCREEN, function(screen)
 	add(screen, "Rectangle", "fader", "FaderRectangle", nil, 0, 0)
 	add(screen, "Image", "panel", "PanelMedium", nil, 0.498471, 0.499512)
@@ -158,11 +181,20 @@ screens.register_internal(SCREEN, function(screen)
 	comps.set(grid, "aligner.area_width", { 820.385 })
 	comps.set(grid, "aligner.area_height", { 362.228 })
 
-	for i = 1, #entries() do
-		local col = (i - 1) % #COLUMNS + 1
+	-- Centred both ways, which for a full 30 comes out at exactly the pak's own
+	-- -0.4..0.4 and for sixteen puts three rows in the middle of the panel
+	-- instead of hanging them off the top. A short last row is centred too: a
+	-- row of four left-aligned under two rows of six reads as a grid that
+	-- failed to finish loading.
+	local total = #entries()
+	local rows = math.ceil(total / #COLUMNS)
+	local first_row = -((rows - 1) / 2) * ROW_STEP
+	for i = 1, total do
 		local row = math.floor((i - 1) / #COLUMNS)
+		local in_row = math.min(#COLUMNS, total - row * #COLUMNS)
+		local col = (i - 1) % #COLUMNS + 1 + math.floor((#COLUMNS - in_row) / 2)
 		add(screen, "Button", "EWeapon_" .. i, "WeaponButton", "grid",
-			COLUMNS[col], FIRST_ROW + row * ROW_STEP)
+			COLUMNS[col], first_row + row * ROW_STEP)
 	end
 
 	local back = add(screen, "Button", "Back", nil, "panel", -0.0002, 0.364379)
@@ -174,6 +206,7 @@ screens.register_internal(SCREEN, function(screen)
 		if key == "ESCAPE" then screens.pop(SCREEN) end
 	end
 	screen.env.OnDraw = function() end
+	screen.env.OnUpdate = transition(screen)
 end)
 
 --- Plate art: its own once the profile has held it, the pak's lock until then.
@@ -222,10 +255,28 @@ local function add_open_button(screen)
 	if button.parent then table.insert(button.parent.children, button) end
 end
 
+--- Let this screen carry a transition phase like any other UI screen.
+--
+-- `screens.load` pins every internal screen at phase 0 and marks it
+-- `no_phase`, because the two the engine ships -- the Title splash and the
+-- GameCrimsonland backdrop -- are not UI at all and must not count as depth.
+-- This one *is* UI, and the pin has a consequence that is invisible until you
+-- look at a rendered frame: `GetStackDepthOffset` sums the transition phase of
+-- every screen above a given one, so a screen pinned at zero is a screen
+-- nothing below it knows is there. The gallery underneath went on drawing
+-- itself at full strength, and thirty plates showed through sixteen.
+--
+-- Cleared here rather than in the builder because `screens.load` sets the pin
+-- *after* calling it.
+local function unpin(screen)
+	screen.no_phase = false
+end
+
 function arsenal.on_screen_enter(screen_name, screen)
 	if screen_name == PAK_GALLERY then
 		add_open_button(screen)
 	elseif screen_name == SCREEN then
+		unpin(screen)
 		fill(screen)
 		-- Opened with a slot number, this screen is a celebration and
 		-- dismisses on any click; opened without one it is the collection and
@@ -303,7 +354,7 @@ function arsenal.on_screen_draw(screen_name, screen)
 
 	local hover = screen._hover_comp
 	local n = hover and hover.name:match("^EWeapon_(%d+)$")
-	local entry = n and list[tonumber(n)]
+	local entry = n and arsenal.entry_at(tonumber(n))
 	if not entry then return end
 	if not gallery.seen("weapon", entry) then
 		tooltip(screen, hover, "???", UNDISCOVERED, DIM)

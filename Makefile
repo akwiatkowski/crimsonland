@@ -1,7 +1,8 @@
 # Crimsonland macOS port — build & run automation.
 #
 # `make run`      — launch the game with LÖVE (interactive play)
-# `make allweapons`   / `make towerdefence`   — launch that mod directly
+# `make allweapons` / `make enhanced` / `make towerdefence` — launch that mod
+# `make pick`     — the enhanced cartridge with a weapon chosen before each run
 
 # `make test`     — autotest: scripted input + ASCII captures to the terminal
 #                   (SCENARIO=<name> picks a src/test/scenarios/ file;
@@ -19,7 +20,7 @@ PAKS     := $(APP_DIR)/data.pak $(APP_DIR)/data-1080p.pak \
             $(APP_DIR)/data-music-OGG_44100.pak $(APP_DIR)/data-sfx-OGG_44100.pak
 STAMP    := $(VENDOR)/.extracted
 
-.PHONY: run test extract clean check-love allweapons towerdefence
+.PHONY: run test extract clean check-love allweapons enhanced towerdefence pick
 
 MOD ?= vanilla
 
@@ -29,6 +30,12 @@ run: check-love
 # Shortcuts for the shipped cartridges — same as `make run MOD=<name>`.
 allweapons enhanced towerdefence: check-love
 	$(LOVE) . --mod=$@
+
+# The enhanced cartridge with its picker on: every chapter open and a weapon
+# chosen off the grids before each run. Off by default because its sixteen
+# weapons are meant to arrive late, and a picker deletes the arrival.
+pick: check-love
+	CL_PICK=1 $(LOVE) . --mod=enhanced
 
 SCENARIO ?= quest-smoke
 

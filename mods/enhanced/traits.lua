@@ -207,6 +207,12 @@ traits.STORM_RING = {
 		p.ring_tick = 0
 		p.muzzle = 0.05
 		combat.used("ring")
+		-- A tick is this weapon's shot, and it has to be counted as one. Every
+		-- other gun spends `fire_shot`, which does this; the ring never goes
+		-- through it, and a weapon that fires no shots cannot be anybody's
+		-- Favorite Weapon on the end screen however much of the quest it won.
+		game.shots = game.shots + 1
+		game.weapon_shots[p.weapon.id] = (game.weapon_shots[p.weapon.id] or 0) + 1
 		for _, c in ipairs(game.creatures) do
 			if not c.dying then
 				local dx, dy = c.x - p.x, c.y - p.y

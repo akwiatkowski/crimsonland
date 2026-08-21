@@ -89,8 +89,14 @@ local function verdict()
 	-- Deliberately kills and not hits, unlike the vanilla sweep's two-part
 	-- claim: half of these weapons do their damage somewhere other than the
 	-- round -- an arc, a pool, a burst, a well -- and `game.hits` only counts
-	-- rounds that touched a body. A Storm Ring can kill a field without ever
-	-- registering a hit, so hits are reported and kills are the verdict.
+	-- rounds that touched a body. Ball Lightning cleared this fight twenty
+	-- times over without a single round ever touching anything, so hits are
+	-- reported and kills are the verdict.
+	--
+	-- The shot count above is still a claim worth making, and it caught
+	-- something: the Storm Ring has no rounds and was not counting its ticks
+	-- as shots, which meant a quest won with it reported someone else's gun as
+	-- the Favorite Weapon on the end screen.
 	if (play.kills or 0) <= 0 then
 		return false, ("%s: %d shots, %d round hits, killed nothing in 15s"):format(
 			WEAPON, play.shots, play.hits or 0)

@@ -36,8 +36,11 @@ for _, weapon in ipairs(require("mods.enhanced.weapons")) do
 end
 
 local altfire = require("mods.enhanced.altfire")
+local arsenal = require("mods.enhanced.arsenal")
 local combat = require("mods.enhanced.combat")
 local play = require("mods.vanilla.game.play")
+
+arsenal.install()
 
 -- A run's own world. The session clock going backwards is what says a new run
 -- started: cheaper than wrapping the six `start_*` functions, and it cannot be
@@ -57,8 +60,29 @@ end
 
 play.on_world_draw = combat.draw
 
+-- Vanilla's game table with three screen hooks in front of it, the way
+-- mods/allweapons layers over the same module. Everything not named here falls
+-- through to vanilla, which is the point: this cartridge never learns what a
+-- chapter, a difficulty or an endless mode is.
+local game = setmetatable({}, { __index = play })
+
+function game.on_screen_enter(screen_name, screen)
+	play.on_screen_enter(screen_name, screen)
+	arsenal.on_screen_enter(screen_name, screen)
+end
+
+function game.on_screen_draw(screen_name, screen)
+	play.on_screen_draw(screen_name, screen)
+	arsenal.on_screen_draw(screen_name, screen)
+end
+
+function game.on_ui_click(screen_name, comp_name)
+	if arsenal.on_ui_click(screen_name, comp_name) then return true end
+	return play.on_ui_click(screen_name, comp_name)
+end
+
 return {
 	name = "enhanced",
-	game = play,
+	game = game,
 	save = require("mods.vanilla.game.save"), -- same format, own directory
 }

@@ -116,6 +116,18 @@ Done:
       now gives every mod its own profile directory, so nothing it clears can
       touch the base game's progress or achievements
 
+- [x] A third cartridge, `mods/enhanced/` — the base game with sixteen weapons
+      it never had and a second trigger for every gun in it. Two families that
+      disagree on purpose: tesla weapons you position rather than aim (an arc
+      that locks on, darts that become a chain network, a charge you gamble, a
+      drifting orb that bites both sides, a ring that closes as you spend it)
+      and rails you aim exactly and pay for (a charged spike, a two-shot
+      cannon, damage that climbs with distance, a beam that splits at the first
+      body, a path left burning, a shot fired from a planted anchor). Plus the
+      first weapons in the port that spend how far away you are *pointing*
+      rather than only the angle. It is a layer over `mods/vanilla/` like the
+      debug cartridge, through six seams no vanilla weapon uses
+
 Next:
 
 - [ ] Gamepad support (`joystick` is enabled but unused)
@@ -135,7 +147,9 @@ make test      # scripted autotest (SCENARIO=quest-smoke): ASCII captures to
 
 Both take `MOD=<name>` to pick a cartridge from `mods/` (default `vanilla`):
 `make run MOD=allweapons` opens every chapter and asks which weapon to start
-with. Each mod keeps its own profile — progress, achievements, statistics and
+with, and `make run MOD=enhanced` is the base game with sixteen more weapons in
+the pool and a secondary on the right mouse button. Each mod keeps its own
+profile — progress, achievements, statistics and
 settings — under `~/Library/Application Support/Crimsonland/mods/<name>/`, so
 playing a debug cartridge cannot unlock anything in the base game.
 
@@ -145,7 +159,8 @@ plays, so weapons/hits/drops are exercised), `survival-smoke`, `rush-smoke`,
 `menus-smoke` (galleries + statistics), `options-smoke`, `fx-smoke`,
 `emitter-smoke`, `editbox-smoke`, `perks-smoke`, `custom-smoke`,
 `allweapons-smoke` and `allweapons-bolts` (need `MOD=allweapons`),
-`terrain-smoke`, `gore-smoke`, `impact-smoke`, `traits-smoke`, plus the `td-*`
+`terrain-smoke`, `gore-smoke`, `impact-smoke`, `traits-smoke`,
+`enhanced-arsenal` and `enhanced-verbs` (need `MOD=enhanced`), plus the `td-*`
 set (needs `MOD=towerdefence`).
 
 Data invariants, which assert rather than only avoid crashing: `drop-table`
@@ -158,7 +173,8 @@ the five authored scenes), `mode-info` (the survival menu's mode panel).
 Parameterised scenarios, which the sweeps below drive rather than being run
 alone: `matrix` (`CL_WEAPON`, `CL_CREATURE`), `bake` and `bake-variety`
 (`CL_CHAPTER`, `CL_QUEST`), `mode` and `mode-menu` (`CL_MODE`), `lethality` and
-`weapon-details` (`CL_WEAPON`), `perk-details` (`CL_PERK`), `keep-display`
+`weapon-details` (`CL_WEAPON`), `enhanced-lethality` (`CL_WEAPON`, as a weapon
+id rather than a gallery slot), `perk-details` (`CL_PERK`), `keep-display`
 (`CL_ANSWER`).
 
 A scenario fails on a stated claim, not only on a crash: a step may carry
@@ -190,13 +206,14 @@ tabulates. An axis is a parameterised scenario crossed with a list read out of
 | `keepdisplay`| keep / revert / time out the resolution dialog|    3 | ~7 s      |
 | `variety`    | each chapter's ten grounds, hashed            |    7 | ~8 s      |
 | `details`    | every weapon's detail screen                  |   30 | 40–50 s   |
+| `enhanced`   | the enhanced cartridge's own arsenal          |   16 | ~25 s     |
 | `lethality`  | every weapon against the first enemy          |   30 | ~40 s     |
-| `named`      | every hand-written scenario                   |   33 | ~100 s    |
+| `named`      | every hand-written scenario                   |   35 | ~110 s    |
 | `perkdetails`| every perk's detail screen                    |   56 | ~96 s     |
 | `bake`       | 7 chapters × 10 quests of ground              |   70 | ~60 s     |
 | `variants`   | all 102 creature variants                     |  102 | 65–120 s  |
 | `matrix`     | 30 weapons × 12 creature types                |  360 | 4–6.5 min |
-| `all`        | every axis above                              | ~700 | 12–13 min |
+| `all`        | every axis above                              | ~720 | 12–14 min |
 
 Times are at the default of 4 jobs on an M4 Pro. **The job count is a RAM
 ceiling, not a CPU one**: each job is a whole LÖVE process that bakes its own
@@ -209,7 +226,8 @@ A single scenario is nearly free: `make test SCENARIO=weapon-details` is one
 process for about three seconds.
 
 In-game controls: WASD/arrows move, mouse aims, LMB fires, R reloads,
-Escape aborts the quest back to the menu.
+Escape aborts the quest back to the menu. RMB is the secondary, which only the
+`enhanced` cartridge does anything with — the original had one trigger.
 
 ## Layout
 
@@ -219,6 +237,7 @@ Escape aborts the quest back to the menu.
 | `src/engine/`           | Reimplemented 10tons engine runtime (screens, comps, NX_* API) |
 | `mods/vanilla/`         | The game as a mod: descriptor, `game/` (quests, creatures, weapons, UI screens) and `fxs/` (the port's own particle effects) |
 | `mods/allweapons/`      | Debug cartridge: everything unlocked, weapon picked before each run |
+| `mods/enhanced/`        | Content cartridge: sixteen new weapons, a secondary for every weapon family, and its own gallery |
 | `src/test/`             | Autotest harness + scripted scenarios (loaded only with `--autotest`) |
 | `tools/`                | `extract_pak.py` — PAK V11 extractor               |
 | `vendor/`               | Original rar, installer, `extracted/`, `assets*/` (gitignored) |
